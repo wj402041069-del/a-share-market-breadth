@@ -60,7 +60,7 @@ code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:12px}
   <h1>A 股市场宽度 · S5TH 云端版</h1>
   <div class="datebadge" id="dateBadge">
     <div class="dbtop">数据日期 <b>2026-11-06</b><span class="dbweek" id="dateWeek"></span><span class="freshtag" id="freshTag">—</span></div>
-    <div class="dbsub">更新于 2026-11-07 14:59（北京时间）· 每交易日 16:30 / 18:00 自动刷新</div>
+    <div class="dbsub">更新于 2026-11-07 15:18（北京时间）· 每交易日 16:30 / 18:00 自动刷新</div>
   </div>
 </div>
 <p class="lead">等权口径：A 股中「后复权收盘价站上 N 日均线」的占比。近 5 年历史，由 GitHub Actions 每交易日自动计算；主图只保留中长期 MA50 / MA200，指数另开一图做归一化背离对比。</p>
@@ -85,11 +85,11 @@ code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:12px}
 <h2>三大指数 与 MA200 占比 · 归一化背离对比</h2>
 <div class="ctl ctl2">
   <b>归一化周期</b>
-  <button data-pct="250" class="on">250 日滚动</button>
-  <button data-pct="5y">5 年周期</button>
-  <span class="pcthint" id="pctHint">默认：近 250 个交易日的相对位置，适合看中短期背离</span>
+  <button data-pct="250">250 日滚动</button>
+  <button data-pct="5y" class="on">5 年周期</button>
+  <span class="pcthint" id="pctHint">5 年全序列滚动窗口：看长期历史位置，近端波动会被压平</span>
 </div>
-<p class="spread-note"><b id="pctWinDesc">滚动 250 个交易日</b> min-max 归一化到 0-100（只用当日及之前数据，口径不随图表缩放漂移；可在上方切换周期）。背景 Spread = MA200 占比分位 − <b id="benchName">沪深300</b> 分位：<b style="color:#E8453C">正值红（宽度领先）</b> / <b style="color:#1FB37A">负值绿（指数领先）</b>，|Spread| ≥ 25 为大劈叉。悬停查看每日明细。</p>
+<p class="spread-note"><b id="pctWinDesc">滚动 1300 个交易日（约 5 年）</b> min-max 归一化到 0-100（只用当日及之前数据，口径不随图表缩放漂移；可在上方切换周期）。背景 Spread = MA200 占比分位 − <b id="benchName">沪深300</b> 分位：<b style="color:#E8453C">正值红（宽度领先）</b> / <b style="color:#1FB37A">负值绿（指数领先）</b>，|Spread| ≥ 25 为大劈叉。悬停查看每日明细。</p>
 <div class="panel"><div id="idx"></div></div>
 <h2>涨跌家数 与 McClellan 振荡器</h2>
 <div class="panel"><div id="sub"></div></div>
@@ -98,9 +98,9 @@ code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:12px}
 <div class="src">
 主数据源：AKShare → 东方财富 <code>stock_zh_a_spot_em</code>（代码清单主源）→ <code>stock_info_a_code_name</code>（备用源）→ <code>codes.txt</code>（带日期兜底）+ <code>stock_zh_a_hist(adjust="hfq")</code>（逐只后复权日线）+ <code>index_zh_a_hist</code>（沪深300 / 上证综指 / 创业板指）。辅助校验：<code>a-stock-api /api/market-breadth</code> 当日快照（不参与均线计算）。<br>
 数据截止 <b>2026-11-06</b>；成功取数 <b>5,758</b> 只、计入计算 <b>5,747</b> 只、本次序列 <b>1300</b> 个交易日。等权、含北交所/科创创业、ST 未单独剔除。股票池由每日在线清单自动纳入新股、剔除退市股；上市满 51 根日线进入 MA5/20/50 宽度，满 200 根进入 MA200 宽度；停牌日不计入分母。<br>
-归一化分位参照 <code>wj624/etf-lsi</code>：每个点取自身及之前 N 个交易日的极值做 min-max 映射到 0-100，N 默认 250（250 日滚动），图 2 可切换为 1300（约 5 年全序列滚动）。两种都是「当日及之前」的滚动窗口，不使用未来极值，也不按图表缩放窗口重算；5 年周期看长期历史位置，但近端波动会被压平。Spread = MA200 占比分位 − 基准指数分位（−100 ~ +100），正红负绿、±25 为大劈叉；这是形状对比，不是收益率。头部百分位是「当前 MA200 占比在近 5 年序列中的 percentile rank」，与滚动归一化分位是两个不同指标。<br>
+归一化分位参照 <code>wj624/etf-lsi</code>：每个点取自身及之前 N 个交易日的极值做 min-max 映射到 0-100，N 默认 1300（约 5 年全序列滚动，图 2 默认），可切换为 250（250 日滚动）。两种都是「当日及之前」的滚动窗口，不使用未来极值，也不按图表缩放窗口重算；5 年周期看长期历史位置，但近端波动会被压平。Spread = MA200 占比分位 − 基准指数分位（−100 ~ +100），正红负绿、±25 为大劈叉；这是形状对比，不是收益率。头部百分位是「当前 MA200 占比在近 5 年序列中的 percentile rank」，与滚动归一化分位是两个不同指标。<br>
 ⚠️ 5 年历史是用「当前股票池」回算的，早期存在幸存者偏差（当时未上市 / 现已退市的股票不在池内），越往前偏差越大，不可表述为「当时的真实全市场宽度」。<br>
-CSV 滚动保留 1300 个交易日；docs/ 超过 500 MB 自动裁剪。GitHub Actions 生成于 2026-11-07 14:59（北京时间）；仅为公开数据统计结果，不构成投资建议。
+CSV 滚动保留 1300 个交易日；docs/ 超过 500 MB 自动裁剪。GitHub Actions 生成于 2026-11-07 15:18（北京时间）；仅为公开数据统计结果，不构成投资建议。
 </div>
 </div>
 <script>
@@ -109,7 +109,7 @@ var COLORS = {'50':'#e0972f','200':'#d64545'};
 var IDX_KEYS = Object.keys(DATA.indices || {});
 var rawMode = false, autoY = false, bigFrame = false;
 var curStart = 0, curEnd = 100, benchKey = 'hs300', CUR_SPREAD = [];
-var pctWin = '250';   // '250' = 默认滚动 250 日；'5y' = 5 年全序列滚动窗口
+var pctWin = '5y';    // 默认 5 年全序列滚动窗口；'250' = 250 日滚动
 var chart = null, idxChart = null, subChart = null;
 
 function fmt(v, suffix) {
@@ -140,7 +140,8 @@ function spreadArray() {
     return (v == null || b[i] == null) ? null : +(v - b[i]).toFixed(2);
   });
 }
-// 默认：MA200 占比 + 沪深300 显示；上证 / 创业板默认关闭。
+// 默认（归一化视图）：沪深300 显示；MA200 占比分位 + 上证 / 创业板默认关闭。
+// 原始走势视图（rawMode）下 MA200 占比默认显示（dft 见下方 rawMode 判断）。
 // 用户手动勾选后以图表实例的真实 selected 为准（不依赖 legendselectchanged 事件，
 // 因此无论点击图例还是脚本 dispatchAction 都能保留）。切换「分位 / 基准 100」
 // 时 series 名称会变，这里按指数 key 在两套命名之间做映射，避免选择被重置。
@@ -166,7 +167,7 @@ function idxLegendSelected() {
       pick(DATA.indexNames[k] + ' 分位', DATA.indexNames[k] + '（基准 100）', k === 'hs300');
   });
   s[rawMode ? 'MA200 占比' : 'MA200 占比分位'] =
-    pick('MA200 占比分位', 'MA200 占比', true);
+    pick('MA200 占比分位', 'MA200 占比', rawMode ? true : false);
   return s;
 }
 function originalIndexSeries(startPct, endPct) {
@@ -371,7 +372,7 @@ function wireControls() {
       });
       document.getElementById('pctHint').textContent = pctWin === '5y'
         ? '5 年全序列滚动窗口：看长期历史位置，近端波动会被压平'
-        : '默认：近 250 个交易日的相对位置，适合看中短期背离';
+        : '250 日滚动窗口：看中短期相对位置，对近期变化更敏感';
       document.getElementById('pctWinDesc').textContent = pctWinLabel();
       refreshIdx();   // 重算 Spread + 重建曲线；图例勾选由 idxLegendSelected() 保留
     };
