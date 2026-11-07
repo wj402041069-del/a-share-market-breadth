@@ -893,7 +893,7 @@ markFreshness();
 def build_verdict(b: float, idx: dict) -> tuple:
     """基于 MA200 占比百分位 b 与三大指数百分位 idx，给出综合研判。
     返回 (标签, 等级, 一句话摘要, 详细论证)。等级: green/amber/red/neutral。
-    阈值: LOW=20, HIGH=80；剪刀差收敛(<25)与出手规则见页内「指导说明」。"""
+    阈值: LOW=20, HIGH=80；剪刀差收敛(<25)与出手规则见页内「用法说明」。"""
     iv = list(idx.values())
     if not iv:
         return ("数据不足", "neutral", "指数数据缺失，无法研判。", "")
@@ -1048,7 +1048,7 @@ def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
                 '<div class="ibar"><i style="width:' + f'{rk:.1f}%' + '"></i></div></div>')
     idx_card_html = '<div class="idxcards">' + idx_cards + '</div>' if idx_cards else ''
 
-    # —— 指导说明（用法说明：怎么读 4 个百分位 & 出手规则）——
+    # —— 用法说明框：怎么读 4 个百分位 & 出手规则（纯用法说明，无论证叙事）——
     guide_html = (
         '<div class="guidebox"><div class="gtitle">怎么读这 4 个百分位 &amp; 出手规则（用法说明）</div>'
         '<div class="gbody">'

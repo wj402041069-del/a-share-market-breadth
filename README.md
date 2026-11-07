@@ -8,6 +8,7 @@
 |---|---|---|
 | **主地址（看板）** | [**https://wj402041069-del.github.io/a-share-market-breadth/**](https://wj402041069-del.github.io/a-share-market-breadth/) | GitHub Pages 托管，手机浏览器直接打开 |
 | **源码 / 手动刷新** | [**https://github.com/wj402041069-del/a-share-market-breadth**](https://github.com/wj402041069-del/a-share-market-breadth) | Actions → A-share Market Breadth → Run workflow |
+| **看板中心（聚合入口）** | [**https://wj-dashboards.pages.dev/**](https://wj-dashboards.pages.dev/) | 一个页面切四个看板，含本看板 |
 | **离线快照** | 仓库 `docs/index.html` | 下载后双击即可看，数据已烤死在 HTML 里，断网也能看 |
 
 > 三个入口是**同一份产物**：流水线跑完把 `docs/` 提交回 `main`，Pages 自动发布。国内偶尔打不开 `github.io` 时，用源码仓库下载 `docs/index.html` 本地打开，内容完全一致。
@@ -194,7 +195,7 @@
 
 | 产物 | 说明 |
 |---|---|
-| `docs/index.html` | 唯一看板；4 张卡片 + 头部百分位（MA200 占比 + 3 指数 共 4 个 5 年百分位）+ 指导论证框 + 结果判断栏 + 主图（宽度曲线）+ 3 张归一化背离子图（上证 / 沪深300 / 创业板 各 vs MA200 占比）+ 最近 15 日表（McClellan 不再绘图） |
+| `docs/index.html` | 唯一看板；4 张卡片 + 头部百分位（MA200 占比 + 3 指数 共 4 个 5 年百分位）+ 用法说明框 + 结果判断栏 + 主图（宽度曲线）+ 3 张归一化背离子图（上证 / 沪深300 / 创业板 各 vs MA200 占比）+ 最近 15 日表（McClellan 不再绘图） |
 | `docs/breadth.csv` | 21 列完整序列，UTF-8 BOM，Excel 可直接打开 |
 | `codes.txt` | 全市场代码快照 + 首行日期标记，随仓库提交，是三级链路的真实兜底数据资产 |
 
@@ -207,7 +208,7 @@
 | **标题右侧日期徽章** | 数据交易日 + 星期 + 「最新 / 距数据日 N 天」标签 + 页面更新时间（北京时间），见 5.5 |
 | 头部四张卡片 | MA5 / MA20 / MA50 / MA200 当前值（明细数据，**不是主图曲线**） |
 | **5 年百分位条（共 4 个百分位）** | MA200 占比在近 1300 个交易日中的 percentile rank、5 年区间与中位、横向进度条；其下方并列 **上证综指 / 沪深300 / 创业板指 各自 5 年 percentile rank 卡片**（见 5.2） |
-| **指导论证框** | 论证「剪刀差落回正常区间 + 指数百分位偏低 → 入手」是否成立，并给出修正后的分批入手规则（见 5.6） |
+| **用法说明框** | 纯用法说明（无「论证 / 修正」叙事）：怎么读 4 个百分位（头部 MA200 占比 + 3 指数 5 年 percentile rank）+ 出手规则（某张子图 |Spread|&lt;25 收敛且对应指数百分位 &lt;30% 时分批入手，绿色大劈叉勿追），见 5.6 |
 | **结果判断栏** | 基于「MA200 占比百分位」与「3 指数百分位」的 8 种组合给出 红 / 橙 / 绿 / 中性 结论，附当日四百分位与 Spread（见 5.6） |
 | 股票池状态条 | 来源 / 刷新日期 / 只数；降级变橙色（见 3.5） |
 | **图 1 宽度曲线（中长期）** | 只画 **MA50、MA200、MA200 长周期 EMA**；MA5 / MA20 都不在这里；**MA50 默认关闭**（见 5.4） |
@@ -348,7 +349,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 
 ## 九、防 Bug 铁律（改动代码前必读）
 
-> **以下 17 条均来自真实踩坑，严禁回退。**
+> **以下 18 条均来自真实踩坑，严禁回退。**
 
 1. **必须用后复权 `adjust="hfq"`**。严禁用不复权收盘价直接算 MA：除权日会假跌破，实测 MA200 占比差约 3 个百分点（24.61% vs 27.57%）。
 2. **`codes.txt` 兜底不能删，且每个在线源都有写回下限**（主源 ≥3000、备用源 ≥5000 只）。push2 对云出口有 WAF 502；把异常小的快照写进兜底文件，等于把一次限流放大成长期数据空洞。**头部 `# updated | source | count` 注释行不能删**，`read_codes_meta()` 靠它判断陈旧、`read_codes_file()` 靠「首字符是数字」跳过它。
@@ -367,6 +368,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 15. **归一化分位默认是滚动 `PCT_WINDOW=250` 日窗口，图 2 可切换滚动 `PCT_WINDOW_5Y=1300` 日窗口，但两者都必须只用「当日及之前」的数据**。严禁整段**固定** min-max（会用未来极值、把近端压平、±25 阈值失效），严禁按当前显示窗口归一化（缩放时口径漂移），严禁在前端重算（两套分位必须由 Python 端 `rolling_minmax_pct()` 一次算好烤进 payload，前端只切换取哪一套）。5 年周期近端会被压平是已知限制，页面必须标注且不得设为默认。Spread 正红 `#E8453C` / 负绿 `#1FB37A` 是 A 股红涨绿跌，不许反色。切换图 2 series 必须用 `replaceMerge:['series']`，普通 `setOption` 会残留旧曲线。
 16. **图例显隐状态只能从图表实例读，不许用 `legendselectchanged` 事件缓存**。`dispatchAction` 不触发该事件，`refreshAll()` 若把事件缓存的 `selected` 写回去会覆盖用户勾选。3 张背离子图默认关闭的曲线（`MA200 占比分位`）必须仍可手动勾选；各子图切换视图时 series 改名，要按指数 key 映射两套命名，不能让默认关闭项被重置为显示。
 17. **页面所有时间统一 `BJ_TZ`（UTC+8），不许用裸 `datetime.now()`**。GitHub Actions runner 是 UTC、本地开发机是北京时间，同一个 `generated_at` 曾因此含义不一致，足以让人误判数据新旧。新鲜度判断也一律用北京时间（`markFreshness()` / `bjNow()`），且只作辅助提示；**「数据日期」必须取 CSV 最后交易日 `__LATEST__`**，严禁用页面生成时间冒充数据日期，也别为消除节假日误报去接交易日历接口（会破坏静态页零外部依赖）。
+
+18. **图表容器的 `id`、CSS 选择器、`cfg.el` 三者必须一字不差地一致**。v3.7 曾踩坑：CSS 写成 `#idxSse,#idxHs,#idxCyb`（驼峰），而 JS 的 `cfg.el = 'idx_' + k` 与 HTML 的 `<div id="idx_...">` 实际是 `idx_sse / idx_hs300 / idx_cyb`，选择器永远匹配不到 → 三个背离子图容器高度塌陷为 0、图表不可见，但 `DATA` 正常、无 JS 报错，极难一眼看出。任何改动图表相关代码后，必须用 headless Chrome 确认每个 `#idx_*` 与 `#main` 的 `clientHeight > 0` 且 `echarts.getInstanceByDom` 能取到实例（验收口径见 5.4 / 12.3 第 8 条）。
 
 > 另外两条工程经验：`docs/breadth.csv` 用 `utf-8-sig` 写 BOM，否则 Excel 打开中文表头乱码；本地通达信 `.day` 是 **32 字节小端**结构，早期解析踩过字节序坑（云端版不读 `.day`，但别把两套代码混着改）。
 
@@ -454,8 +457,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 5. **5 年回算**：`LOOKBACK_DAYS` 必须 ≥ 200 日均线预热 + 1300 输出日。减小它会让曲线左端出现假值。
 6. **HTML 占位符**：模板用 `__XXX__` 唯一占位符一次性替换；改回 f-string 拼整页 JS 会因为大括号转义整页失效，且 `node --check` 能提前发现。
 7. **股票池静默冻结**：最隐蔽的失败不是报错，而是长期用旧 `codes.txt` 还显示绿色。任何改动 `get_codes()` / 幂等判断的代码，都必须保留「每次重拉清单 + 日期标记 + 超 7 天禁止跳过 + 降级橙色告警」，否则新上市股票会永远进不来且无人察觉。
-8. **归一化分位窗口**：`rolling_minmax_pct()` 只接受「当日及之前」的滚动窗口（250 默认 / 1300 可选），不能整段固定 min-max，也不能按图表显示窗口算，更不能把两套分位挪到前端实时算（会出现前视偏差或缩放漂移）。新增周期时两套都要在 Python 端算好写进 payload。图 2 切换 series 必须带 `replaceMerge:['series']`，否则 `setOption` 的 merge 会留下旧曲线，看起来像「切换没生效」或出现幽灵线。改完务必用 headless Chrome 加载 `docs/index.html`，确认 3 个 `<canvas>`、两种周期切换后 `CUR_SPREAD` 末值确实不同、且控制台无 JS 异常。
-9. **图例状态别用事件缓存**：`legendselectchanged` 对 `dispatchAction` 不触发，靠它存偏好会让「切换视图后手动勾选丢失」；读 `getOption().legend[0].selected` 才可靠。图 2 两种视图的 series 名称不同（` 分位` / `（基准 100）`），重建图例时必须按指数 key 映射两套命名，否则默认关闭的上证 / 创业板分位会被重新打开。改完要分别验证「零操作切换」与「手动勾选后切换」两种场景。
+8. **归一化分位窗口**：`rolling_minmax_pct()` 只接受「当日及之前」的滚动窗口（250 默认 / 1300 可选），不能整段固定 min-max，也不能按图表显示窗口算，更不能把两套分位挪到前端实时算（会出现前视偏差或缩放漂移）。新增周期时两套都要在 Python 端算好写进 payload。3 张背离子图切换 series 必须带 `replaceMerge:['series']`，否则 `setOption` 的 merge 会留下旧曲线，看起来像「切换没生效」或出现幽灵线。改完务必用 headless Chrome 加载 `docs/index.html`，确认 **4 个 `<canvas>`（主图 + 3 张子图）**、两种周期切换后 Spread 末值确实不同、控制台无 JS 异常，且每个 `#idx_*` / `#main` 容器 `clientHeight > 0`（曾因 CSS 选择器与 div id 不匹配导致子图高度塌陷为 0，见第九章第 18 条）。
+9. **图例状态别用事件缓存**：`legendselectchanged` 对 `dispatchAction` 不触发，靠它存偏好会让「切换视图后手动勾选丢失」；读 `getOption().legend[0].selected` 才可靠。3 张背离子图两种视图的 series 名称不同（` 分位` / `（基准 100）`），重建图例时必须按指数 key 映射两套命名，否则默认关闭的 MA200 占比分位会被重新打开。改完要分别验证「零操作切换」与「手动勾选后切换」两种场景。
 
 **可调旋钮表见第八章**，改之前先确认是否同时需要改 `maintenance.yml` 的 `--max-rows`。
 
@@ -490,7 +493,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 【先读什么】
 1. README 第三章「数据源、单位与剔除项」→ 认清主链路（AKShare 东财逐股后复权日线）
    与辅助链路（a-stock-api Worker 当日快照）。
-2. README 第九章「防 Bug 铁律」17 条 → 全部来自真实踩坑，禁止回退。
+2. README 第九章「防 Bug 铁律」18 条 → 全部来自真实踩坑，禁止回退。
 3. README 第十二章 → 12.1 文件职责表、12.3 九个坑、12.4 SOP；改股票池前读 3.5，改图表前读第五章（尤其 5.4 默认显隐）。
 4. 要动 Worker 时读 https://github.com/wj624/a-stock-api 的 README。
 
@@ -509,11 +512,11 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 - 5 年历史是「当前股票池回算」，有幸存者偏差，不许表述为当时的真实全市场。
 - HTML 用 __XXX__ 唯一占位符整段替换，生成后抽 <script> 跑 node --check。
 - 图例默认关闭的三条曲线必须仍可手动勾选；显隐状态从 getOption().legend[0].selected 读取，
-  不许用 legendselectchanged 事件缓存；图 2 切换视图时按指数 key 映射两套 series 命名。
+  不许用 legendselectchanged 事件缓存；3 张背离子图切换视图时按指数 key 映射两套 series 命名。
 - 标题旁「数据日期」取 CSV 最后交易日；页面生成时间统一 BJ_TZ(UTC+8)；
   新鲜度标签只是辅助提示，节假日会误报，不许接交易日历接口。
 - 归一化分位两套窗口（250 / 1300）都必须是「当日及之前」滚动、由 Python 端算好烤进 payload；
-  严禁整段固定 min-max、按显示窗口重算或放到前端算；**图 2 默认 5 年全序列（1300 日）、可切 250 日**，两套都由 `rolling_minmax_pct()` 在 Python 端算好。
+  严禁整段固定 min-max、按显示窗口重算或放到前端算；**图 2（拆成 3 张独立子图）默认 5 年全序列（1300 日）、可切 250 日**，两套都由 `rolling_minmax_pct()` 在 Python 端算好。
 - 仓库内绝不写任何 PAT；CI 用 GITHUB_TOKEN。
 - 绝不 force push、不重写 main 历史；500MB 清理只裁剪 docs/ 数据。
 - Worker 是辅助链路，失败静默跳过，绝不能接成主数据源。
@@ -523,7 +526,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 2. python breadth.py --limit 300 --codes-file codes.txt --out test-out --force --min-valid 100
    日志应出现 1300 个交易日、3 条指数曲线，且无异常退出。
 3. 抽 docs/index.html 的 <script> 跑 node --check；再用 headless Chrome 确认
-   3 个 canvas、图例默认显隐及切换视图后的状态保留（照 5.4 验收口径）。
+   4 个 canvas（主图 + 3 张子图）、图例默认显隐及切换视图后的状态保留（照 5.4 验收口径）。
 4. 全量跑一次，比对锚点：2026-09-21 MA200 ≈ 27.45%、2026-11-06 ≈ 12.07%。
 5. grep -R "ghp_|github_pat_" 确认无密钥；确认 docs/ 未超过 50MB 单文件护栏。
 
@@ -568,12 +571,18 @@ commit message 用中文，说明「改了什么 + 为什么」；涉及口径�
 
 ## 附：配色说明
 
+> 红涨绿跌是 A 股约定；**所有图表颜色都不许反色**。MA5 / MA20 自 v3.2 起已从主图移除，仅作为「最近 15 日」表的数值列出现，故不占图表配色。
+
 | 用途 | 颜色 |
 |---|---|
-| 站上 MA5 | `#8a63d2` 紫 |
-| 站上 MA20 | `#2f6fd0` 蓝 |
-| 站上 MA50 | `#e0972f` 橙 |
-| 站上 MA200（S5TH 同类，加粗） | `#d64545` 红 |
-| 沪深300 / 上证综指 / 创业板指 | `#e0972f` / `#2f6fd0` / `#8a63d2` |
-| 上涨 / 下跌家数 | `#d64545` 红 / `#1f9d6b` 绿 |
-| 长周期 EMA | `#8a93a3` 灰虚线 |
+| 站上 MA50（主图，中长期） | `#e0972f` 橙 |
+| 站上 MA200（主图，S5TH 同类，加粗） | `#d64545` 红 |
+| MA200 占比长周期 EMA（主图） | `#8a93a3` 灰虚线 |
+| 沪深300 / 上证综指 / 创业板指（三张背离子图各自的指数曲线） | `#e0972f` / `#2f6fd0` / `#8a63d2` |
+| MA200 占比分位（背离子图，默认关闭） | `#d64545` 红 |
+| Spread 背景 红（宽度领先）/ 绿（指数领先） | `rgba(232,69,60,.20)` / `rgba(31,159,107,.20)`（约等于 `#E8453C` / `#1FB37A` 的 20% 透明） |
+| Spread 线 | `#6b7688` 灰 |
+| 上涨 / 下跌家数（最近 15 日表） | `#d64545` 红 / `#1f9d6b` 绿 |
+| 头部四卡片 / 百分位条大数字 | `#2f6fd0` 蓝（进度条填充同色） |
+| 百分位进度条 / 指数卡片条 | 渐变 `#1f9d6b → #e0972f → #d64545`（绿→橙→红，表示百分位从低到高） |
+| 结果判断栏 绿 / 橙 / 红 / 中性 | 左边框 `#1f9d6b` / `#e0972f` / `#d64545` / `#8a93a3` |
