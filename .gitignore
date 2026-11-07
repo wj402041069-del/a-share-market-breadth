@@ -3,5 +3,7 @@ __pycache__/
 .venv/
 venv/
 *.log
+test-out/
+full_run.log
 .DS_Store
 .idea/
