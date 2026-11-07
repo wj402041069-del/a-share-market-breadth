@@ -1,0 +1,68 @@
+name: A-share Market Breadth
+
+on:
+  schedule:
+    # GitHub Actions 的 cron 一律按 UTC 解释；UTC 08:30 = 北京 16:30
+    - cron: '30 8 * * 1-5'
+    # 兜底：北京时间 18:00。若 16:30 那次失败，这次真正重算；
+    # 若已成功，脚本会读辅助源日期幂等跳过，几乎零成本
+    - cron: '0 10 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: '只取前 N 只股票（0 = 全市场，调试用）'
+        required: false
+        default: '0'
+      force:
+        description: '强制重算（跳过幂等判断）'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: market-breadth
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TZ: Asia/Shanghai
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compute market breadth
+        env:
+          LIMIT: ${{ inputs.limit }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          ARGS="--out docs"
+          if [ -n "$LIMIT" ] && [ "$LIMIT" != "0" ]; then ARGS="$ARGS --limit $LIMIT"; fi
+          if [ "$FORCE" = "true" ]; then ARGS="$ARGS --force"; fi
+          python breadth.py $ARGS
+
+      - name: Commit report back to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs codes.txt
+          if git diff --cached --quiet; then
+            echo "数据未变化（非交易日 / 已幂等跳过），不提交"
+          else
+            git commit -m "chore: update market breadth $(date +%F)"
+            git pull --rebase origin main
+            git push
+          fi
