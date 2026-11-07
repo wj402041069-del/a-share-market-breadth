@@ -1,0 +1,32 @@
+name: 数据新鲜度检查（死信开关）
+
+# 死信开关：定期断言看板数据未过期。若数据过期（数据源故障 / 工作流静默跳过），
+# 本工作流以「失败」告终，GitHub 会按仓库通知设置邮件/站内提醒仓库所有者。
+# 检查脚本零外部依赖，不依赖数据源是否在线，因此自身不会因东财/akshare 故障而失效。
+
+on:
+  schedule:
+    # 北京时间 09:30：周三 + 周六各一次，足以覆盖一周内任何交易日未更新的情况
+    - cron: '30 1 * * 3'
+    - cron: '30 1 * * 6'
+  workflow_dispatch: {}   # 允许手动立即触发
+
+permissions:
+  contents: read          # 只读仓库即可，无需写权限
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 断言数据未过期
+        run: python check_freshness.py
+        # 脚本在过期时退出码 1 → 此步骤失败 → 整个 job 失败 → 触发 GitHub 通知

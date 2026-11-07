@@ -20,6 +20,8 @@ h1{font-size:25px;margin:0 0 6px}h2{font-size:17px;margin:30px 0 10px}
 .dbsub{font-size:11px;color:var(--muted);margin-top:2px}
 .freshtag{display:inline-block;margin-left:9px;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#eef7f0;color:#235c3a;border:1px solid #cfe6d6;vertical-align:2px}
 .freshtag.stale{background:#fff4e8;border-color:#f0cfa4;color:#8a5218}
+.stalebanner{display:none;margin:0 0 14px;padding:11px 14px;border-radius:10px;background:#fff1f0;border:1px solid #f3b4ad;color:#a3332b;font-size:13px;font-weight:600;line-height:1.7}
+.stalebanner.show{display:block}
 .lead{color:var(--muted);margin:0 0 16px;font-size:13px}
 .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
@@ -76,6 +78,7 @@ th{background:#f1f3f7;color:var(--muted);font-weight:600}th:first-child,td:first
 code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:12px}
 @media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}.wrap{padding:18px 12px 40px}.hint,.pcthint{display:none}#main{height:360px}#idx_sse,#idx_hs300,#idx_cyb{height:260px}.pbbig{font-size:30px}.headrow{align-items:flex-start}.datebadge{white-space:normal}.dbtop b{font-size:15px}.idxcards{grid-template-columns:repeat(1,1fr)}}
 </style></head><body><div class="wrap">
+<div class="stalebanner" id="staleBanner"></div>
 <div class="headrow">
   <h1>A 股市场宽度 · S5TH 云端版</h1>
   <div class="datebadge" id="dateBadge">
@@ -328,7 +331,12 @@ function markFreshness(){
   tag.className = 'freshtag';
   tag.title = '判断口径：北京时间 18:30 前期待上一工作日数据，之后期待当日数据，已跳过周末。法定节假日 / 临时休市不在判断范围内，请以数据日期为准。';
   var ds = DATA.dates || [];
-  if (!ds.length) { tag.textContent = '无数据'; tag.className = 'freshtag stale'; return; }
+  var banner = document.getElementById('staleBanner');
+  if (!ds.length) {
+    tag.textContent = '无数据'; tag.className = 'freshtag stale';
+    if (banner) { banner.textContent = '⚠ 看板无数据，请检查数据源与仓库 Actions。'; banner.className = 'stalebanner show'; }
+    return;
+  }
   var latest = ds[ds.length-1], p = latest.split('-');
   var ld = new Date(+p[0], +p[1]-1, +p[2]);
   var wk = document.getElementById('dateWeek');
@@ -340,8 +348,13 @@ function markFreshness(){
   var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   var gap = Math.max(0, Math.round((today - ld)/86400000));
   // YYYY-MM-DD 字典序即时间序：latest 不早于应有交易日就算最新（含数据比预期更新的情形）
-  if (latest >= ymd(exp)) { tag.textContent = '最新'; }
-  else { tag.textContent = '距数据日 ' + gap + ' 天'; tag.className = 'freshtag stale'; }
+  if (latest >= ymd(exp)) {
+    tag.textContent = '最新';
+    if (banner) banner.className = 'stalebanner';
+  } else {
+    tag.textContent = '距数据日 ' + gap + ' 天'; tag.className = 'freshtag stale';
+    if (banner) { banner.textContent = '⚠ 数据已停留 ' + gap + ' 天未更新（最后交易日 ' + latest + '）。如非法定节假日/周末，可能数据源异常，请检查仓库 Actions 是否失败。'; banner.className = 'stalebanner show'; }
+  }
 }
 
 function wireControls() {
