@@ -64,7 +64,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="docs/ 体积体检与清理")
     ap.add_argument("--out", default="docs")
     ap.add_argument("--max-mb", type=float, default=500)
-    ap.add_argument("--max-rows", type=int, default=750)
+    ap.add_argument("--max-rows", type=int, default=1300)
     ap.add_argument("--single-file-mb", type=float, default=50)
     a = ap.parse_args()
 
