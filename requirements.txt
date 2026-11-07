@@ -1,0 +1,4 @@
+# 版本锁定：akshare 接口会变；pandas 3.x 移除了 resample('M') 等 API，必须锁 <3
+akshare==1.20.21
+pandas<3
+numpy<3
