@@ -363,7 +363,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 4. **停牌日不计入当日分母，每档均线独立分母**。把 MA200 无值的股票算成「未站上」，会让 5 年曲线左端系统性偏低且不会报错。
 5. **交易日历用全市场个股日期并集（阈值 30%）**，严禁只依赖指数文件。本地版用上证指数日历时曾误剔 920 只股票。
 6. **红涨绿跌**：上涨 `#d64545`、下跌 `#1f9d6b`。严禁反色。
-7. **依赖锁死 `akshare==1.20.21 / pandas<3 / numpy<3`**。pandas 3.x 移除 `resample('M')` 等 API，会打断 akshare 内部逻辑；升级前必须本地全量验证。
+7. **依赖锁死 `akshare==1.20.21 / pandas<3 / numpy<3`**。pandas 3.x 移除 `resample('M')` 等 API，会打断 akshare 内部逻辑；升级前必须本地全量验证。**版本升级 / 接口挂了的完整处置见 12.4-F**（先小样本试装 → 过 2026-09-21 / 2026-11-06 两个锚点 → 才改 pin，不过就回滚；严禁无脑 `pip -U` 直接上线）。
 8. **境外 runner 四件套不能删**：`socket.setdefaulttimeout(12)`、并发 10、重试 2、`timeout-minutes: 90`。akshare 内部 `requests` 未设超时，境外遇连接问题会挂死；实测 v2 全量重算 19.9 分钟成功、幂等跳过 0.4 分钟，v3 改 5 年窗口后取数更重，故上限留到 90 分钟。
 9. **5 年历史是「当前股票池回算」**，有幸存者偏差。严禁在页面 / 文档里表述为「当时的真实全市场宽度」。
 10. **HTML 用唯一占位符 `__XXX__` 整段替换，不用 f-string 拼整页 JS**。一处括号转义错整页图表全废；生成后必须抽出 `<script>` 跑 `node --check`。
@@ -473,13 +473,13 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 
 **可调旋钮表见第八章**，改之前先确认是否同时需要改 `maintenance.yml` 的 `--max-rows`。
 
-### 12.4 五类常见任务的 SOP
+### 12.4 六类常见任务的 SOP
 
 **A. 上游接口变了 / akshare 升级**
 1. 本地跑 `--limit 300 --codes-file codes.txt --out test-out --force --min-valid 100`，确认 `df["日期"]` / `df["收盘"]` 字段名与单位没变。
 2. 确认 `index_zh_a_hist` 三个代码仍返回日线。
 3. 全量跑一次，比对 2026-09-21 锚点（MA200 ≈ 27.45%）与 2026-11-06 锚点（≈ 12.07%）。
-4. 两处都对得上再升级 `requirements.txt`，并同步第九章第 7 条。
+4. 两处都对得上再升级 `requirements.txt`，并同步第九章第 7 条；**升级 / 回滚 / 换源的完整流程见 F**。
 
 **B. 换股票池 / 加指数**
 - 换池：只准备 `--codes-file` 文件，**不要改 `codes.txt`**（它是全市场兜底）。
@@ -504,6 +504,22 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 5. **别做**：为了变绿去改 `breadth.csv` 日期、放宽 `check_freshness.py` 阈值或关掉 workflow——那只会把「可用性故障」变成「数据正确性故障」。
 6. 若确认是长假（春节 / 国庆）正常空窗可忽略；连续多个交易日仍红，按 SOP A 查 akshare / 东财接口是否变更。
 
+**F. akshare 版本升级 / 接口挂了（换最新版本）**
+> 结论：**能换，但不是无脑 `pip install -U`**——换完必须过锚点才许上线，否则宁可回滚。升级是「动主链路」，按第九章第 7 条与本章锚点严格执行。
+
+1. **先分清「版本问题」还是「接口/网络问题」**：看 `breadth.yml` 日志。若是 `KeyError: '收盘'` / 字段名变 / `index_zh_a_hist` 异常 → 多半是 akshare 随东财改版未跟上或版本漂移，值得试升级；若是大量超时 / `仅成功取到 N 只` → 先按境外四件套与 D.1 处理（限流/网络），`pip -U` 通常救不了。
+2. **查最新版本**：`pip index versions akshare`（或看 https://pypi.org/project/akshare/ ）。写此文档时项目锁 `akshare==1.20.21`，PyPI 最新为 `1.20.35`（会持续变化，以查询结果为准）。
+3. **隔离试装 + 小样本验证**（**别直接改 CI 试**）：
+   ```bash
+   pip install -U "akshare==<新版本>"
+   python breadth.py --limit 300 --codes-file codes.txt --out test-out --force --min-valid 100
+   ```
+   确认 `stock_zh_a_hist` 仍返回 `日期 / 收盘 / 成交量` 等列、`hfq` 序列仍连续、`index_zh_a_hist` 三个指数（000300/000001/399006）正常。
+4. **过锚点才准上线**：全量跑一次，比对 **2026-09-21 MA200 ≈ 27.45%**、**2026-11-06 ≈ 12.07%**。偏差 > 0.3 个百分点即视为口径变了 → **回滚，不许上线**。
+5. **通过后**：改 `requirements.txt` 的 pin → 同步第九章第 7 条与版本记录 → 正常 commit（**绝不 force push**）。
+6. **回滚**：`git checkout requirements.txt`（或把 pin 改回旧版本）重新部署即可，`docs/` 数据文件不受影响。
+7. **若升级也救不了**（东财对海外 IP 全面拦截 / akshare 放弃该端点）：换版本无用，得换数据源——实现等价的 `fetch_one()` / `fetch_indices()`（tushare / 新浪 / 腾讯行情均可），但**必须保持 `adjust="hfq"` 后复权、字段语义、`MIN_VALID` 护栏不变**，并过同样的锚点。注意 `codes.txt` 与 `a-stock-api` **只提供代码清单 / 当日快照，不含全量历史日线，不能单独顶替主链路**；实在不行可把 CI 迁到国内 self-hosted runner。
+
 ### 12.5 可复制给 AI 的提示词
 
 ```text
@@ -514,7 +530,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 1. README 第三章「数据源、单位与剔除项」→ 认清主链路（AKShare 东财逐股后复权日线）
    与辅助链路（a-stock-api Worker 当日快照）。
 2. README 第九章「防 Bug 铁律」19 条 → 全部来自真实踩坑，禁止回退。
-3. README 第十二章 → 12.1 文件职责表、12.3 十个坑、12.4 SOP（尤其 E「数据过期怎么排查」）；改股票池前读 3.5，改图表前读第五章（尤其 5.4 默认显隐）。
+3. README 第十二章 → 12.1 文件职责表、12.3 十个坑、12.4 SOP（尤其 E「数据过期排查」、F「akshare 升级/接口挂了」）；改股票池前读 3.5，改图表前读第五章（尤其 5.4 默认显隐）。
 4. 要动 Worker 时读 https://github.com/wj624/a-stock-api 的 README。
 
 【硬约束，违反即算错】
@@ -527,7 +543,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
   未满 200 根者不进 MA200 分母；幂等跳过前必须检查代码池陈旧度（7 天）。
 - 交易日历用全市场个股日期并集（阈值 30%），不许只依赖指数文件。
 - 红涨绿跌：上涨 #d64545、下跌 #1f9d6b。
-- 依赖锁 akshare==1.20.21 / pandas<3 / numpy<3，升级前必须本地全量验证。
+- 依赖锁 akshare==1.20.21 / pandas<3 / numpy<3，升级前必须本地全量验证（流程见 12.4-F：先小样本、再锚点、过了才改 pin，不过就回滚；严禁直接 -U 上线）。
 - 境外 runner 四件套不能删：12 秒 socket 超时、并发 10、重试 2、timeout 90。
 - 5 年历史是「当前股票池回算」，有幸存者偏差，不许表述为当时的真实全市场。
 - HTML 用 __XXX__ 唯一占位符整段替换，生成后抽 <script> 跑 node --check。
