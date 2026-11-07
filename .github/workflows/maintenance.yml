@@ -1,0 +1,81 @@
+name: Repository Size Housekeeping
+
+# 每周一 UTC 03:00（北京 11:00）只做一次「体积体检」；
+# 低于 500 MB 直接结束，一个字节都不改、绝不碰 main 历史。
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'true = 忽略体积阈值，强制做一次裁剪体检'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  housekeeping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Read repository size (KB)
+        id: size
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          KB=$(gh api "repos/${{ github.repository }}" --jq '.size' 2>/dev/null || echo 0)
+          echo "kb=${KB}" >> "$GITHUB_OUTPUT"
+          echo "仓库体积: ${KB} KB（阈值 512000 KB = 500 MB）"
+          echo "### 体积体检：${KB} KB" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Decide
+        id: decide
+        env:
+          FORCE: ${{ inputs.force }}
+          KB: ${{ steps.size.outputs.kb }}
+        run: |
+          if [ "${KB:-0}" -ge 512000 ] || [ "$FORCE" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "低于阈值且未强制，跳过清理" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Guardrails
+        if: steps.decide.outputs.run == 'true'
+        run: |
+          test -f README.md || { echo "护栏失败: README.md 缺失"; exit 1; }
+          COUNT=$(git ls-files | wc -l)
+          echo "受版本控制文件数: $COUNT"
+          [ "$COUNT" -ge 5 ] || { echo "护栏失败: 文件数过少"; exit 1; }
+          echo "旧 HEAD: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Trim data (no force push, no history rewrite)
+        if: steps.decide.outputs.run == 'true'
+        run: python housekeeping.py --out docs --max-mb 500 --max-rows 750
+
+      - name: Commit trimmed data
+        if: steps.decide.outputs.run == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs
+          if git diff --cached --quiet; then
+            echo "无需改动，未提交"
+          else
+            git commit -m "chore: housekeeping trim docs data"
+            git pull --rebase origin main
+            git push
+          fi
