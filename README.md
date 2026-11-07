@@ -112,7 +112,7 @@ python housekeeping.py --out docs --max-mb 500 --max-rows 750          # 体积�
 
 ## 已知风险
 
-- **接口可达性**：GitHub 境外 runner 访问东财可能限流 / WAF。已用 `codes.txt` 兜底代码清单、3 次重试、6 并发、空结果保护来缓解；逐股历史走 `push2his`（未被 WAF 记录）。持续失败时 Action 变红并发邮件。
+- **接口可达性 / 运行耗时**：GitHub 境外 runner 访问东财可能限流 / WAF，且逐只 ~5900 次请求明显慢于国内（首次全量实测 20 分钟以上）。已做四层缓解：`codes.txt` 兜底代码清单、网络层 12 秒 socket 超时（akshare 内部 requests 未设超时，境外遇到连接问题会挂死）、10 并发 + 2 次重试、`timeout-minutes: 60`；逐股历史走 `push2his`（未被 WAF 记录）。若仍嫌慢，用 `--codes-file hs300.txt` 换成成分股口径，请求量降到 ~300，2~3 分钟即可跑完，也更贴近 S5TH 原义。空结果 / 样本不足时 Action 变红并发邮件，不会覆盖好数据。
 - **补充源**：`a-stock-api` 的 Worker 若不可达，只影响幂等判断和校验卡片，不影响主计算。
 - **接口变更**：`akshare` 锁在 `1.20.21`，升级前先本地验证字段。
 - **额度**：公开仓库 Actions 分钟数免费不限量；私有仓库每月 2000 分钟，每天约 10 分钟也够。
