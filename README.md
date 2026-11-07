@@ -363,7 +363,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 4. **停牌日不计入当日分母，每档均线独立分母**。把 MA200 无值的股票算成「未站上」，会让 5 年曲线左端系统性偏低且不会报错。
 5. **交易日历用全市场个股日期并集（阈值 30%）**，严禁只依赖指数文件。本地版用上证指数日历时曾误剔 920 只股票。
 6. **红涨绿跌**：上涨 `#d64545`、下跌 `#1f9d6b`。严禁反色。
-7. **依赖锁死 `akshare==1.20.21 / pandas<3 / numpy<3`**。pandas 3.x 移除 `resample('M')` 等 API，会打断 akshare 内部逻辑；升级前必须本地全量验证。**版本升级 / 接口挂了的完整处置见 12.4-F**（先小样本试装 → 过 2026-09-21 / 2026-11-06 两个锚点 → 才改 pin，不过就回滚；严禁无脑 `pip -U` 直接上线）。
+7. **依赖锁死 `akshare==1.20.35 / pandas<3 / numpy<3`**。pandas 3.x 移除 `resample('M')` 等 API，会打断 akshare 内部逻辑；升级前必须本地全量验证。**版本升级 / 接口挂了的完整处置见 12.4-F**（先小样本试装 → 过 2026-09-21 / 2026-11-06 两个锚点 → 才改 pin，不过就回滚；严禁无脑 `pip -U` 直接上线）。
 8. **境外 runner 四件套不能删**：`socket.setdefaulttimeout(12)`、并发 10、重试 2、`timeout-minutes: 90`。akshare 内部 `requests` 未设超时，境外遇连接问题会挂死；实测 v2 全量重算 19.9 分钟成功、幂等跳过 0.4 分钟，v3 改 5 年窗口后取数更重，故上限留到 90 分钟。
 9. **5 年历史是「当前股票池回算」**，有幸存者偏差。严禁在页面 / 文档里表述为「当时的真实全市场宽度」。
 10. **HTML 用唯一占位符 `__XXX__` 整段替换，不用 f-string 拼整页 JS**。一处括号转义错整页图表全废；生成后必须抽出 `<script>` 跑 `node --check`。
@@ -437,7 +437,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 | `codes.txt` | 5923 只代码快照 + **首行日期标记**，随仓库提交的数据资产 | 删了 / 写坏会让一次 WAF 限流放大成长期空洞；删掉首行 `# updated` 会让陈旧保护失效 |
 | `.github/workflows/breadth.yml` | 双 cron、取数、提交 | 改 cron 记得按 UTC 换算；`timeout-minutes` 90 不能减 |
 | `.github/workflows/maintenance.yml` | 每周体积体检 | 阈值 512000 KB、护栏、不 force push 是硬约束 |
-| `requirements.txt` | `akshare==1.20.21 / pandas<3 / numpy<3` | 放开 `pandas<3` 会在某次升级后静默打断 akshare |
+| `requirements.txt` | `akshare==1.20.35 / pandas<3 / numpy<3` | 放开 `pandas<3` 会在某次升级后静默打断 akshare |
 | `docs/index.html` | 生成物，ECharts 看板 | 别手改，下次运行会覆盖；要改去改 `HTML_TEMPLATE` |
 | `docs/breadth.csv` | 生成物，最多 1300 行 | 别当临时缓存清理 |
 
@@ -508,7 +508,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 > 结论：**能换，但不是无脑 `pip install -U`**——换完必须过锚点才许上线，否则宁可回滚。升级是「动主链路」，按第九章第 7 条与本章锚点严格执行。
 
 1. **先分清「版本问题」还是「接口/网络问题」**：看 `breadth.yml` 日志。若是 `KeyError: '收盘'` / 字段名变 / `index_zh_a_hist` 异常 → 多半是 akshare 随东财改版未跟上或版本漂移，值得试升级；若是大量超时 / `仅成功取到 N 只` → 先按境外四件套与 D.1 处理（限流/网络），`pip -U` 通常救不了。
-2. **查最新版本**：`pip index versions akshare`（或看 https://pypi.org/project/akshare/ ）。写此文档时项目锁 `akshare==1.20.21`，PyPI 最新为 `1.20.35`（会持续变化，以查询结果为准）。
+2. **查最新版本**：`pip index versions akshare`（或看 https://pypi.org/project/akshare/ ）。项目已于 2026-11-07 由 `1.20.21` 升到 `akshare==1.20.35` 并通过全市场锚点（1300 个交易日四档占比最大偏差 0.09pct）；最新版本会持续变化，以 `pip index versions` 查询为准。
 3. **隔离试装 + 小样本验证**（**别直接改 CI 试**）：
    ```bash
    pip install -U "akshare==<新版本>"
@@ -543,7 +543,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
   未满 200 根者不进 MA200 分母；幂等跳过前必须检查代码池陈旧度（7 天）。
 - 交易日历用全市场个股日期并集（阈值 30%），不许只依赖指数文件。
 - 红涨绿跌：上涨 #d64545、下跌 #1f9d6b。
-- 依赖锁 akshare==1.20.21 / pandas<3 / numpy<3，升级前必须本地全量验证（流程见 12.4-F：先小样本、再锚点、过了才改 pin，不过就回滚；严禁直接 -U 上线）。
+- 依赖锁 akshare==1.20.35 / pandas<3 / numpy<3，升级前必须本地全量验证（流程见 12.4-F：先小样本、再锚点、过了才改 pin，不过就回滚；严禁直接 -U 上线）。
 - 境外 runner 四件套不能删：12 秒 socket 超时、并发 10、重试 2、timeout 90。
 - 5 年历史是「当前股票池回算」，有幸存者偏差，不许表述为当时的真实全市场。
 - HTML 用 __XXX__ 唯一占位符整段替换，生成后抽 <script> 跑 node --check。
@@ -596,6 +596,7 @@ commit message 用中文，说明「改了什么 + 为什么」；涉及口径�
 | 2026-11-07 v3.6 | 默认调整 | **图 2 默认改为「5 年周期」（1300 日滚动）、默认关闭「MA200 占比分位」**（仅显示沪深300 分位 + Spread 背景）。`var pctWin` 默认 `'5y'`、按钮 `5 年周期` 默认高亮、`pctWinDesc` 初始文案同步；`idxLegendSelected()` 归一化视图下 MA200 占比分位默认 `false`（原始走势视图下仍默认 `true`）。README 5.1 / 5.3 / 5.4 / 第八章旋钮 / 第九章第 15·16 条铁律 / Q2·Q13 同步改写。纯前端 + 文档改动，`breadth.csv` 与 `codes.txt` 未变，HTML 240128→240299 B |
 | 2026-11-07 v3.7 | 拆分+百分位+结论 | 图 2「三大指数」**拆成 3 张独立子图**（上证 / 沪深300 / 创业板 各 vs MA200 占比，四图联动）；MA200 占比百分位条下方新增 **3 张指数 5 年百分位卡片**，共 **4 个百分位**；**移除 McClellan 振荡器图表**（涨跌家数仅留 15 日表，CSV 仍保留该列）；新增「用法说明框」（怎么读 4 个百分位 + 出手规则：|Spread|<25 收敛且指数百分位<30% 时分批入手）与「结果判断栏」（`build_verdict()` 按 MA200 占比百分位 × 3 指数百分位的 8 种组合给出 红/橙/绿/中性 结论）。后续修复 3 张子图 CSS 高度选择器不匹配（`#idxSse` → `#idx_sse` 等）使图表正常显示。纯前端 + 文档，`breadth.csv` 与 `codes.txt` 未变，HTML ≈ 219 KB |
 | 2026-11-07 v3.8 | 新鲜度死信开关 | 新增 `check_freshness.py`（零依赖）以北京时间断言 CSV 最后交易日不早于应有交易日，过期 / 缺失 / 解析失败退出码 1；新增 `.github/workflows/freshness.yml`（周三 / 周六 09:30 北京 + 手动触发，断言失败即 job 失败 → GitHub 通知）；页面顶部新增红色告警横幅 `#staleBanner`（过期 / 无数据时显示），保留原 `freshtag` 小标签。纯前端 + 新增检查脚本 / 工作流，`breadth.csv` 与 `codes.txt` 未变 |
+| 2026-11-07 v3.9 | 依赖升级 | `akshare` **1.20.21 → 1.20.35**（PyPI 最新）。按 12.4-F 验证：小样本 300 只全链路通过 → 全市场 5923 只（成功 5751 / 有效 5740）→ 锚点 2026-09-21 **27.45→27.46**、2026-11-06 **12.06→12.06**，1300 个交易日四档占比最大偏差 **0.09pct**（远低于 0.3pct 阈值），判定口径等价后改 pin。`breadth.csv` 与 `codes.txt` 未变 |
 
 **交叉验证锚点**（两套完全不同数据源 / 复权方式）：
 
