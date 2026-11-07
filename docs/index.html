@@ -35,7 +35,7 @@ code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:12px}
 <h1>A 股市场宽度 · S5TH 云端版</h1>
 <p class="lead">等权口径：A 股中「后复权收盘价站上 N 日均线」的占比。近 5 年历史，由 GitHub Actions 每交易日自动计算。</p>
 <div class="cards"><div class="card"><div class="lab">站上 5 日均线</div><div class="val">63.5<span>%</span></div><div class="sub">3453 / 5435 只</div></div><div class="card"><div class="lab">站上 20 日均线</div><div class="val">33.2<span>%</span></div><div class="sub">1807 / 5435 只</div></div><div class="card"><div class="lab">站上 50 日均线</div><div class="val">21.9<span>%</span></div><div class="sub">1193 / 5435 只</div></div><div class="card"><div class="lab">站上 200 日均线</div><div class="val">12.1<span>%</span></div><div class="sub">656 / 5435 只</div></div></div>
-
+<div class="aux"><b>当日快照校验</b>（a-stock-api /api/market-breadth，独立数据源，口径略有差异）：2026-11-06 上涨 678 / 下跌 4633 / 平 68（合计 5379）；涨停 32、跌停 15、最高连板 5 板。</div>
 <h2>宽度曲线 与 三大指数对比</h2>
 <div class="ctl">
   <b>区间</b>
@@ -55,7 +55,7 @@ code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:12px}
 主数据源：AKShare → 东方财富 <code>stock_zh_a_spot_em</code>（代码清单，失败回退 <code>codes.txt</code>）+ <code>stock_zh_a_hist(adjust="hfq")</code>（逐只后复权日线）+ <code>index_zh_a_hist</code>（沪深300 / 上证综指 / 创业板指）。辅助校验：<code>a-stock-api /api/market-breadth</code> 当日快照（不参与均线计算）。<br>
 数据截止 <b>2026-11-06</b>；成功取数 <b>5,644</b> 只、计入计算 <b>5,638</b> 只、本次序列 <b>1300</b> 个交易日。等权、含北交所/科创创业、ST 未单独剔除、上市不足 200 交易日者剔除、停牌日不计入分母。<br>
 ⚠️ 5 年历史是用「当前股票池」回算的，早期存在幸存者偏差（当时未上市 / 现已退市的股票不在池内），越往前偏差越大，不可表述为「当时的真实全市场宽度」。<br>
-CSV 滚动保留 1300 个交易日；docs/ 超过 500 MB 自动裁剪。GitHub Actions 生成于 2026-11-07 11:23:53；仅为公开数据统计结果，不构成投资建议。
+CSV 滚动保留 1300 个交易日；docs/ 超过 500 MB 自动裁剪。GitHub Actions 生成于 2026-11-07 11:48:01；仅为公开数据统计结果，不构成投资建议。
 </div>
 </div>
 <script>
