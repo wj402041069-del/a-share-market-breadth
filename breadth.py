@@ -44,9 +44,13 @@ import sys
 import time
 import urllib.request
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
+
+# 页面时间统一显示北京时间：GitHub Actions runner 是 UTC，直接用 datetime.now()
+# 会让「生成于」在本地（北京）与云端（UTC）含义不一致，进而误判数据是否最新。
+BJ_TZ = timezone(timedelta(hours=8))
 
 try:
     import akshare as ak
@@ -414,7 +418,7 @@ def compute(data: dict, idx_maps: dict) -> dict:
             "index_names": {k: v[1] for k, v in INDEXES.items()},
             "index_colors": {k: v[2] for k, v in INDEXES.items()},
             "latest": rows[-1]["date"] if rows else "",
-            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+            "generated_at": datetime.now(BJ_TZ).strftime("%Y-%m-%d %H:%M")}
 
 
 # ----------------------------------------------------------------------------
@@ -490,6 +494,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
 .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 60px}
 h1{font-size:25px;margin:0 0 6px}h2{font-size:17px;margin:30px 0 10px}
+.headrow{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+.headrow h1{margin:0}
+.datebadge{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 14px;white-space:nowrap}
+.dbtop{font-size:12px;color:var(--muted)}
+.dbtop b{display:inline-block;margin-left:5px;font-size:17px;color:var(--txt);letter-spacing:.3px;vertical-align:-1px}
+.dbweek{font-size:11px;color:var(--muted);margin-left:6px}
+.dbsub{font-size:11px;color:var(--muted);margin-top:2px}
+.freshtag{display:inline-block;margin-left:9px;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#eef7f0;color:#235c3a;border:1px solid #cfe6d6;vertical-align:2px}
+.freshtag.stale{background:#fff4e8;border-color:#f0cfa4;color:#8a5218}
 .lead{color:var(--muted);margin:0 0 16px;font-size:13px}
 .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
@@ -522,9 +535,15 @@ th,td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:right;white
 th{background:#f1f3f7;color:var(--muted);font-weight:600}th:first-child,td:first-child{text-align:left}
 .src{color:var(--muted);font-size:12px;margin-top:20px;border-top:1px solid var(--line);padding-top:12px}
 code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:12px}
-@media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}.wrap{padding:18px 12px 40px}.hint{display:none}#main{height:360px}#idx{height:300px}.pbbig{font-size:30px}}
+@media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}.wrap{padding:18px 12px 40px}.hint{display:none}#main{height:360px}#idx{height:300px}.pbbig{font-size:30px}.headrow{align-items:flex-start}.datebadge{white-space:normal}.dbtop b{font-size:15px}}
 </style></head><body><div class="wrap">
-<h1>A 股市场宽度 · S5TH 云端版</h1>
+<div class="headrow">
+  <h1>A 股市场宽度 · S5TH 云端版</h1>
+  <div class="datebadge" id="dateBadge">
+    <div class="dbtop">数据日期 <b>__LATEST__</b><span class="dbweek" id="dateWeek"></span><span class="freshtag" id="freshTag">—</span></div>
+    <div class="dbsub">更新于 __GEN__（北京时间）· 每交易日 16:30 / 18:00 自动刷新</div>
+  </div>
+</div>
 <p class="lead">等权口径：A 股中「后复权收盘价站上 N 日均线」的占比。近 5 年历史，由 GitHub Actions 每交易日自动计算；主图只保留中长期 MA50 / MA200，指数另开一图做归一化背离对比。</p>
 <div class="cards">__CARDS__</div>
 __PCTBAND__
@@ -556,7 +575,7 @@ __AUX__
 数据截止 <b>__LATEST__</b>；成功取数 <b>__NFETCH__</b> 只、计入计算 <b>__NVALID__</b> 只、本次序列 <b>__NDAYS__</b> 个交易日。等权、含北交所/科创创业、ST 未单独剔除。股票池由每日在线清单自动纳入新股、剔除退市股；上市满 __MINBARS__ 根日线进入 MA5/20/50 宽度，满 200 根进入 MA200 宽度；停牌日不计入分母。<br>
 归一化分位参照 <code>wj624/etf-lsi</code>：每个点取自身及之前 __PCTWINDOW__ 个交易日的极值做 min-max 映射到 0-100，Spread = MA200 占比分位 − 基准指数分位（−100 ~ +100），正红负绿、±__SPREADBIG__ 为大劈叉；这是形状对比，不是收益率。头部百分位是「当前 MA200 占比在近 5 年序列中的 percentile rank」，与滚动归一化分位是两个不同指标。<br>
 ⚠️ 5 年历史是用「当前股票池」回算的，早期存在幸存者偏差（当时未上市 / 现已退市的股票不在池内），越往前偏差越大，不可表述为「当时的真实全市场宽度」。<br>
-CSV 滚动保留 __MAXROWS__ 个交易日；docs/ 超过 __MAXMB__ MB 自动裁剪。GitHub Actions 生成于 __GEN__；仅为公开数据统计结果，不构成投资建议。
+CSV 滚动保留 __MAXROWS__ 个交易日；docs/ 超过 __MAXMB__ MB 自动裁剪。GitHub Actions 生成于 __GEN__（北京时间）；仅为公开数据统计结果，不构成投资建议。
 </div>
 </div>
 <script>
@@ -772,6 +791,35 @@ function setRange(days) {
   if (btn) btn.classList.add('on');
 }
 
+// 标题旁的新鲜度标签：用北京时间判断数据日期是否已是「应有」的最近交易日。
+// 口径：北京 18:30（18:00 兜底 cron + 余量）之前期待上一工作日数据，之后期待当日数据；
+// 周六日自动跳过。法定节假日 / 临时休市纯前端无法识别，故只给温和提示，
+// 最终一律以徽章上显示的数据日期为准（tag.title 里也写明了这个边界）。
+function pad2(n){ return n < 10 ? '0'+n : ''+n; }
+function ymd(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+function bjNow(){ return new Date(Date.now() + (480 + new Date().getTimezoneOffset())*60000); }
+function markFreshness(){
+  var tag = document.getElementById('freshTag');
+  if (!tag) return;
+  tag.className = 'freshtag';
+  tag.title = '判断口径：北京时间 18:30 前期待上一工作日数据，之后期待当日数据，已跳过周末。法定节假日 / 临时休市不在判断范围内，请以数据日期为准。';
+  var ds = DATA.dates || [];
+  if (!ds.length) { tag.textContent = '无数据'; tag.className = 'freshtag stale'; return; }
+  var latest = ds[ds.length-1], p = latest.split('-');
+  var ld = new Date(+p[0], +p[1]-1, +p[2]);
+  var wk = document.getElementById('dateWeek');
+  if (wk && !isNaN(ld.getTime())) wk.textContent = ['周日','周一','周二','周三','周四','周五','周六'][ld.getDay()];
+  var now = bjNow();
+  var exp = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (now.getHours()*60 + now.getMinutes() < 18*60+30) exp.setDate(exp.getDate()-1);
+  while (exp.getDay()===0 || exp.getDay()===6) exp.setDate(exp.getDate()-1);
+  var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var gap = Math.max(0, Math.round((today - ld)/86400000));
+  // YYYY-MM-DD 字典序即时间序：latest 不早于应有交易日就算最新（含数据比预期更新的情形）
+  if (latest >= ymd(exp)) { tag.textContent = '最新'; }
+  else { tag.textContent = '距数据日 ' + gap + ' 天'; tag.className = 'freshtag stale'; }
+}
+
 function wireControls() {
   document.querySelectorAll('.ctl button[data-days]').forEach(function (b) {
     b.onclick = function () { setRange(+this.getAttribute('data-days')); };
@@ -815,6 +863,7 @@ if (typeof echarts !== 'undefined') {
   if (g.length > 1) echarts.connect(g);
 }
 wireControls();
+markFreshness();
 </script>
 </body></html>"""
 
