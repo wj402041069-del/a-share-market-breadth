@@ -207,8 +207,8 @@
 | 头部四张卡片 | MA5 / MA20 / MA50 / MA200 当前值（明细数据，**不是主图曲线**） |
 | **5 年百分位条** | 当前 MA200 占比在近 1300 个交易日中的 percentile rank、5 年区间与中位、横向进度条 |
 | 股票池状态条 | 来源 / 刷新日期 / 只数；降级变橙色（见 3.5） |
-| **图 1 宽度曲线（中长期）** | 只画 **MA50、MA200、MA200 长周期 EMA**；MA5 / MA20 与三大指数都不在这里 |
-| **图 2 三大指数 与 MA200 占比 · 归一化背离对比** | 独立图，位于图 1 正下方；四条归一化分位曲线 + Spread 红绿背景 |
+| **图 1 宽度曲线（中长期）** | 只画 **MA50、MA200、MA200 长周期 EMA**；MA5 / MA20 与三大指数都不在这里；**MA50 默认关闭**（见 5.4） |
+| **图 2 三大指数 与 MA200 占比 · 归一化背离对比** | 独立图，位于图 1 正下方；四条归一化分位曲线 + Spread 红绿背景；**上证综指 / 创业板指分位默认关闭**（见 5.4） |
 | 图 3 涨跌家数 与 McClellan | 保持原样 |
 | 最近 15 日表 | 完整四档明细（MA5 / MA20 数据仍在 CSV 与表格里，只是不上主图） |
 
@@ -245,9 +245,25 @@ Spread[i] = MA200 占比分位[i] − 基准指数分位[i]        取值 −100
 | **背离基准下拉** | 沪深300 / 上证综指 / 创业板指，仅影响 Spread |
 | **放大图框 / 还原** | 图 1 420↔680 px、图 2 320↔500 px，自动 `resize()` |
 | **纵轴自适应 / 固定 0-100** | 图 1 左轴在固定刻度与窗口自适应之间切换 |
-| **图例** | 每条曲线可单独勾选显隐 |
+| **图例** | 每条曲线可单独勾选显隐；三条曲线默认关闭但可随时打开，默认清单见 5.4 |
 
 手机端隐藏控件说明文字，按钮仍可点；图表高度自动降到 360 / 300 px。
+
+### 5.4 默认显隐与用户选择保留
+
+用户反馈「默认全开太吵」，v3.3 起三条曲线默认关闭，**数据仍在、随时可用图例勾选显示**：
+
+| 图表 | 默认显示 | 默认关闭（可手动勾选） |
+|---|---|---|
+| 图 1 宽度曲线（中长期） | 站上 200 日线（S5TH 同类）、MA200 占比长周期 EMA | **站上 50 日线** |
+| 图 2 归一化背离对比 | MA200 占比分位、沪深300 分位、Spread 背景 | **上证综指 分位、创业板指 分位** |
+
+实现约定（改前端前必读）：
+
+- 默认靠 `legend.selected` 初始化：图 1 写死 `{'站上 50 日线':false}`；图 2 由 `idxLegendSelected()` 生成，按 `IDX_KEYS` 给 `hs300` 默认 `true`、其余 `false`。
+- **不要挂 `legendselectchanged` 事件来缓存用户偏好**。`dispatchAction({type:'legendSelect'})` 不触发该事件，用事件缓存会出现「手动勾选丢了」的假象；正确做法是 `refreshIdx()` 时由 `idxChart.getOption().legend[0].selected` 读取图表实例的**真实**状态，`pick()` 在无记录时兜底默认值。
+- 图 2 切换「归一化分位 / 原始走势」时 series 名称从 `<名称> 分位` 变成 `<名称>（基准 100）`，图例项会重建。所以 `idxLegendSelected()` 必须按**指数 key** 在两套命名之间映射，否则每次切换都会把用户勾选重置回默认；MA200 占比的两种命名同理。
+- 验收口径：headless Chrome 加载 `docs/index.html`，确认 3 个 `<canvas>`，并分别检查「零操作来回切换视图」与「手动勾选上证后切换视图」两种场景下 `getOption().legend[0].selected` 符合预期。
 
 ## 六、GitHub Actions 部署与定时
 
@@ -291,7 +307,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 
 ## 九、防 Bug 铁律（改动代码前必读）
 
-> **以下 15 条均来自真实踩坑，严禁回退。**
+> **以下 16 条均来自真实踩坑，严禁回退。**
 
 1. **必须用后复权 `adjust="hfq"`**。严禁用不复权收盘价直接算 MA：除权日会假跌破，实测 MA200 占比差约 3 个百分点（24.61% vs 27.57%）。
 2. **`codes.txt` 兜底不能删，且每个在线源都有写回下限**（主源 ≥3000、备用源 ≥5000 只）。push2 对云出口有 WAF 502；把异常小的快照写进兜底文件，等于把一次限流放大成长期数据空洞。**头部 `# updated | source | count` 注释行不能删**，`read_codes_meta()` 靠它判断陈旧、`read_codes_file()` 靠「首字符是数字」跳过它。
@@ -308,6 +324,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 13. **股票池每次运行必须重新拉当日清单**，禁止把 `codes.txt` 当静态成分股表直接复用。新股上市、退市摘牌全靠这一步同步；`codes.txt` 只是三级链路的最后兜底。降级到备用源 / 兜底时必须在结果页打橙色告警条，不许静默。
 14. **幂等跳过前必须先检查代码池陈旧度**。只看辅助源 `date` 会让一次长期兜底把新上市股票永久挡在门外（`get_codes()` 根本没被调用）；`POOL_MAX_AGE_DAYS = 7` 与 `read_codes_meta()` 不能删。**`MIN_BARS` 只改一个常量就能回退口径**，不要在 `fetch_one()` / `compute()` 里各写死一个数字。
 15. **归一化分位必须用滚动 `PCT_WINDOW=250` 日窗口，严禁整段 5 年一起 min-max，也严禁按当前显示窗口归一化**。整段归一化会把近端压成水平线、±25 阈值失效；按显示窗口归一化会让缩放时口径漂移。Spread 正红 `#E8453C` / 负绿 `#1FB37A` 是 A 股红涨绿跌，不许反色。切换图 2 series 必须用 `replaceMerge:['series']`，普通 `setOption` 会残留旧曲线。
+16. **图例显隐状态只能从图表实例读，不许用 `legendselectchanged` 事件缓存**。`dispatchAction` 不触发该事件，`refreshIdx()` 若把事件缓存的 `selected` 写回去会覆盖用户勾选。三条默认关闭的曲线（图 1 `站上 50 日线`、图 2 `上证综指 分位` / `创业板指 分位`）必须仍可手动勾选；图 2 切换视图时 series 改名，要按指数 key 映射两套命名，不能让默认关闭项被重置为显示。
 
 > 另外两条工程经验：`docs/breadth.csv` 用 `utf-8-sig` 写 BOM，否则 Excel 打开中文表头乱码；本地通达信 `.day` 是 **32 字节小端**结构，早期解析踩过字节序坑（云端版不读 `.day`，但别把两套代码混着改）。
 
@@ -386,7 +403,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 - Worker 属于另一个仓库 `wj624/a-stock-api`，它没有逐股历史与复权，**严禁把它接成主数据源**。
 - 只要 `/api/market-breadth` 的 `date` 字段不变，本项目一行都不用改。
 
-### 12.3 八个必踩坑（按踩坑频率排序）
+### 12.3 九个必踩坑（按踩坑频率排序）
 
 1. **空数组 ≠ 没数据**：Worker 曾把上游失败吞成 `200 + {"data":[]}` 并缓存；本项目对应防线是 `MIN_VALID` / 取数下限 / 拒绝覆盖。任何新接口都要照这个模式写。
 2. **分母**：停牌日不计入、每档均线独立分母、上市不足 `MIN_BARS`(51) 根日线者整只剔除、未满 200 根者不进 MA200 分母。改错不会报错，只会让曲线悄悄偏低。
@@ -396,6 +413,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 6. **HTML 占位符**：模板用 `__XXX__` 唯一占位符一次性替换；改回 f-string 拼整页 JS 会因为大括号转义整页失效，且 `node --check` 能提前发现。
 7. **股票池静默冻结**：最隐蔽的失败不是报错，而是长期用旧 `codes.txt` 还显示绿色。任何改动 `get_codes()` / 幂等判断的代码，都必须保留「每次重拉清单 + 日期标记 + 超 7 天禁止跳过 + 降级橙色告警」，否则新上市股票会永远进不来且无人察觉。
 8. **归一化分位窗口**：`rolling_minmax_pct()` 必须是滚动 250 日，不能整段 5 年 min-max，也不能按图表显示窗口算。图 2 切换 series 必须带 `replaceMerge:['series']`，否则 `setOption` 的 merge 会留下旧曲线，看起来像「切换没生效」或出现幽灵线。改完务必用 headless Chrome 加载 `docs/index.html`，确认 3 个 `<canvas>` 都在且控制台无 JS 异常。
+9. **图例状态别用事件缓存**：`legendselectchanged` 对 `dispatchAction` 不触发，靠它存偏好会让「切换视图后手动勾选丢失」；读 `getOption().legend[0].selected` 才可靠。图 2 两种视图的 series 名称不同（` 分位` / `（基准 100）`），重建图例时必须按指数 key 映射两套命名，否则默认关闭的上证 / 创业板分位会被重新打开。改完要分别验证「零操作切换」与「手动勾选后切换」两种场景。
 
 **可调旋钮表见第八章**，改之前先确认是否同时需要改 `maintenance.yml` 的 `--max-rows`。
 
@@ -430,8 +448,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 【先读什么】
 1. README 第三章「数据源、单位与剔除项」→ 认清主链路（AKShare 东财逐股后复权日线）
    与辅助链路（a-stock-api Worker 当日快照）。
-2. README 第九章「防 Bug 铁律」15 条 → 全部来自真实踩坑，禁止回退。
-3. README 第十二章 → 12.1 文件职责表、12.3 八个坑、12.4 SOP；改股票池前读 3.5，改图表前读第五章。
+2. README 第九章「防 Bug 铁律」16 条 → 全部来自真实踩坑，禁止回退。
+3. README 第十二章 → 12.1 文件职责表、12.3 九个坑、12.4 SOP；改股票池前读 3.5，改图表前读第五章（尤其 5.4 默认显隐）。
 4. 要动 Worker 时读 https://github.com/wj624/a-stock-api 的 README。
 
 【硬约束，违反即算错】
@@ -445,9 +463,11 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 - 交易日历用全市场个股日期并集（阈值 30%），不许只依赖指数文件。
 - 红涨绿跌：上涨 #d64545、下跌 #1f9d6b。
 - 依赖锁 akshare==1.20.21 / pandas<3 / numpy<3，升级前必须本地全量验证。
-- 境外 runner 四件套不能删：12 秒 socket 超时、并发 10、重试 2、timeout 60。
+- 境外 runner 四件套不能删：12 秒 socket 超时、并发 10、重试 2、timeout 90。
 - 5 年历史是「当前股票池回算」，有幸存者偏差，不许表述为当时的真实全市场。
 - HTML 用 __XXX__ 唯一占位符整段替换，生成后抽 <script> 跑 node --check。
+- 图例默认关闭的三条曲线必须仍可手动勾选；显隐状态从 getOption().legend[0].selected 读取，
+  不许用 legendselectchanged 事件缓存；图 2 切换视图时按指数 key 映射两套 series 命名。
 - 仓库内绝不写任何 PAT；CI 用 GITHUB_TOKEN。
 - 绝不 force push、不重写 main 历史；500MB 清理只裁剪 docs/ 数据。
 - Worker 是辅助链路，失败静默跳过，绝不能接成主数据源。
@@ -456,7 +476,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 1. python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"
 2. python breadth.py --limit 300 --codes-file codes.txt --out test-out --force --min-valid 100
    日志应出现 1300 个交易日、3 条指数曲线，且无异常退出。
-3. 抽 docs/index.html 的 <script> 跑 node --check。
+3. 抽 docs/index.html 的 <script> 跑 node --check；再用 headless Chrome 确认
+   3 个 canvas、图例默认显隐及切换视图后的状态保留（照 5.4 验收口径）。
 4. 全量跑一次，比对锚点：2026-09-21 MA200 ≈ 27.45%、2026-11-06 ≈ 12.07%。
 5. grep -R "ghp_|github_pat_" 确认无密钥；确认 docs/ 未超过 50MB 单文件护栏。
 
@@ -479,7 +500,8 @@ commit message 用中文，说明「改了什么 + 为什么」；涉及口径�
 | 2026-11-07 v2 | 多源兜底 | `codes.txt`、a-stock-api 幂等/校验、500 MB 自动清理、依赖上界 |
 | 2026-11-07 v3 | 5 年 + 指数 | 半年 → **5 年（1300 交易日）**、三大指数同图对比（同竖轴 / 独立竖轴）、区间按钮 + 滚轮缩放 + 图框/纵轴切换、README 按 `wj624/etf-lsi` 体例重写、CI 超时 90 分钟 |
 | 2026-11-07 v3.1 | 股票池自治 | **股票池三级链路**（主源 → `stock_info_a_code_name` 备用源 → 带日期 `codes.txt`）、页面股票池状态条与橙色降级告警、代码池超 7 天禁止幂等跳过、`MIN_BARS=51` 让新股分档纳入 |
-| 2026-11-07 v3.2 | 本次 | 主图移除 MA5 / MA20 与指数曲线；**指数独立成图 2**，与 MA200 占比按 etf-lsi 滚动 250 日分位归一化，Spread 正红负绿背景 + ±25 阈值 + 基准切换；三图 `echarts.connect` 联动；页头新增 MA200 占比 5 年百分位条 |
+| 2026-11-07 v3.2 | 三图联动 | 主图移除 MA5 / MA20 与指数曲线；**指数独立成图 2**，与 MA200 占比按 etf-lsi 滚动 250 日分位归一化，Spread 正红负绿背景 + ±25 阈值 + 基准切换；三图 `echarts.connect` 联动；页头新增 MA200 占比 5 年百分位条 |
+| 2026-11-07 v3.3 | 本次 | 图 1 `站上 50 日线`、图 2 `上证综指 分位` / `创业板指 分位` **默认关闭**（仍可手动勾选）；图例状态改由 `getOption().legend[0].selected` 读取、去掉 `legendselectchanged` 事件缓存，切换视图时按指数 key 映射两套 series 命名以保留用户勾选。纯前端改动，`breadth.csv` 与 `codes.txt` 未变 |
 
 **交叉验证锚点**（两套完全不同数据源 / 复权方式）：
 
