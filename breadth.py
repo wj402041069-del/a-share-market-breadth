@@ -33,6 +33,7 @@ import concurrent.futures as cf
 import csv
 import json
 import os
+import socket
 import sys
 import time
 import urllib.request
@@ -51,8 +52,9 @@ OUT_DAYS = 120               # 图表展示的交易日数
 MAX_CSV_ROWS = 750           # CSV 最多保留的交易日（约 3 年），超出自动裁剪
 LOOKBACK_DAYS = 620          # 自然日，约 400 个交易日，足够 200 日均线 + 120 天输出
 CALENDAR_BARS = 330
-MAX_WORKERS = 6
-RETRY = 3
+MAX_WORKERS = 10             # 境外 runner 逐只请求慢，适当提高并发
+RETRY = 2
+SOCKET_TIMEOUT = 12          # 关键：akshare 内部 requests 未设超时，境外遇到连接问题会挂死
 
 CODES_SNAPSHOT = "codes.txt"
 AUX_API = "https://a-stock-api.wj4020410.workers.dev"
@@ -181,7 +183,7 @@ def fetch_all(codes: list[str], start: str, end: str) -> dict:
             code, df = fu.result()
             if df is not None:
                 out[code] = df
-            if i % 1000 == 0 or i == len(codes):
+            if i % 500 == 0 or i == len(codes):
                 print(f"  历史日线 {i}/{len(codes)}，成功 {len(out)}", flush=True)
     return out
 
@@ -483,6 +485,7 @@ lineChart(); barChart();
 
 def main() -> int:
     global MAX_WORKERS
+    socket.setdefaulttimeout(SOCKET_TIMEOUT)
     ap = argparse.ArgumentParser(description="云端版 A 股市场宽度（带存储治理）")
     ap.add_argument("--out", default="docs")
     ap.add_argument("--limit", type=int, default=0)
