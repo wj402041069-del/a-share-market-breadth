@@ -71,7 +71,8 @@ MAX_DIR_MB = 500
 SINGLE_FILE_MB = 50
 MIN_BARS = 51               # 进入计算所需最少日线（MA50 需 50 根 + 1）；改回 205 = 恢复「上市满 200 日才纳入」旧口径
 POOL_MAX_AGE_DAYS = 7       # codes.txt 超过该自然日数未刷新就禁止幂等跳过（覆盖春节/国庆长假）
-PCT_WINDOW = 250            # etf-lsi 归一化分位的滚动窗口（交易日）
+PCT_WINDOW = 250            # 默认：etf-lsi 归一化分位的滚动窗口（交易日）
+PCT_WINDOW_5Y = MAX_CSV_ROWS  # 可选：图 2 可切换的 5 年全序列滚动窗口（交易日）
 SPREAD_BIG = 25             # |Spread| 达到该值算「大劈叉」
 
 CODES_SNAPSHOT = "codes.txt"
@@ -414,6 +415,9 @@ def compute(data: dict, idx_maps: dict) -> dict:
             "indices": indices,
             "p200_pct": rolling_minmax_pct(p200_raw),
             "index_pct": {k: rolling_minmax_pct(v) for k, v in indices.items()},
+            "p200_pct_5y": rolling_minmax_pct(p200_raw, window=PCT_WINDOW_5Y),
+            "index_pct_5y": {k: rolling_minmax_pct(v, window=PCT_WINDOW_5Y)
+                             for k, v in indices.items()},
             "p200_values": p200_raw,
             "index_names": {k: v[1] for k, v in INDEXES.items()},
             "index_colors": {k: v[2] for k, v in INDEXES.items()},
@@ -527,6 +531,8 @@ h1{font-size:25px;margin:0 0 6px}h2{font-size:17px;margin:30px 0 10px}
 .ctl button:hover{border-color:#2f6fd0;color:#2f6fd0}
 .ctl button.on{background:#2f6fd0;border-color:#2f6fd0;color:#fff}
 .hint{margin-left:auto;font-size:11px;color:#8a93a3}
+.ctl2{margin:-4px 0 10px}
+.pcthint{font-size:11px;color:#8a93a3;margin-left:2px}
 .panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px}
 #main{height:420px}#idx{height:320px}#sub{height:250px}
 select.ctlsel{border:1px solid #d8dde6;border-radius:6px;padding:5px 8px;background:#fff;color:#1f2733;font-size:12px;cursor:pointer}
@@ -535,7 +541,7 @@ th,td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:right;white
 th{background:#f1f3f7;color:var(--muted);font-weight:600}th:first-child,td:first-child{text-align:left}
 .src{color:var(--muted);font-size:12px;margin-top:20px;border-top:1px solid var(--line);padding-top:12px}
 code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:12px}
-@media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}.wrap{padding:18px 12px 40px}.hint{display:none}#main{height:360px}#idx{height:300px}.pbbig{font-size:30px}.headrow{align-items:flex-start}.datebadge{white-space:normal}.dbtop b{font-size:15px}}
+@media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}.wrap{padding:18px 12px 40px}.hint,.pcthint{display:none}#main{height:360px}#idx{height:300px}.pbbig{font-size:30px}.headrow{align-items:flex-start}.datebadge{white-space:normal}.dbtop b{font-size:15px}}
 </style></head><body><div class="wrap">
 <div class="headrow">
   <h1>A 股市场宽度 · S5TH 云端版</h1>
@@ -564,7 +570,13 @@ __AUX__
 </div>
 <div class="panel"><div id="main"></div></div>
 <h2>三大指数 与 MA200 占比 · 归一化背离对比</h2>
-<p class="spread-note">滚动 __PCTWINDOW__ 交易日 min-max 归一化到 0-100（口径不随图表缩放漂移）。背景 Spread = MA200 占比分位 − <b id="benchName">沪深300</b> 分位：<b style="color:#E8453C">正值红（宽度领先）</b> / <b style="color:#1FB37A">负值绿（指数领先）</b>，|Spread| ≥ __SPREADBIG__ 为大劈叉。悬停查看每日明细。</p>
+<div class="ctl ctl2">
+  <b>归一化周期</b>
+  <button data-pct="250" class="on">250 日滚动</button>
+  <button data-pct="5y">5 年周期</button>
+  <span class="pcthint" id="pctHint">默认：近 250 个交易日的相对位置，适合看中短期背离</span>
+</div>
+<p class="spread-note"><b id="pctWinDesc">滚动 __PCTWINDOW__ 个交易日</b> min-max 归一化到 0-100（只用当日及之前数据，口径不随图表缩放漂移；可在上方切换周期）。背景 Spread = MA200 占比分位 − <b id="benchName">沪深300</b> 分位：<b style="color:#E8453C">正值红（宽度领先）</b> / <b style="color:#1FB37A">负值绿（指数领先）</b>，|Spread| ≥ __SPREADBIG__ 为大劈叉。悬停查看每日明细。</p>
 <div class="panel"><div id="idx"></div></div>
 <h2>涨跌家数 与 McClellan 振荡器</h2>
 <div class="panel"><div id="sub"></div></div>
@@ -573,7 +585,7 @@ __AUX__
 <div class="src">
 主数据源：AKShare → 东方财富 <code>stock_zh_a_spot_em</code>（代码清单主源）→ <code>stock_info_a_code_name</code>（备用源）→ <code>codes.txt</code>（带日期兜底）+ <code>stock_zh_a_hist(adjust="hfq")</code>（逐只后复权日线）+ <code>index_zh_a_hist</code>（沪深300 / 上证综指 / 创业板指）。辅助校验：<code>a-stock-api /api/market-breadth</code> 当日快照（不参与均线计算）。<br>
 数据截止 <b>__LATEST__</b>；成功取数 <b>__NFETCH__</b> 只、计入计算 <b>__NVALID__</b> 只、本次序列 <b>__NDAYS__</b> 个交易日。等权、含北交所/科创创业、ST 未单独剔除。股票池由每日在线清单自动纳入新股、剔除退市股；上市满 __MINBARS__ 根日线进入 MA5/20/50 宽度，满 200 根进入 MA200 宽度；停牌日不计入分母。<br>
-归一化分位参照 <code>wj624/etf-lsi</code>：每个点取自身及之前 __PCTWINDOW__ 个交易日的极值做 min-max 映射到 0-100，Spread = MA200 占比分位 − 基准指数分位（−100 ~ +100），正红负绿、±__SPREADBIG__ 为大劈叉；这是形状对比，不是收益率。头部百分位是「当前 MA200 占比在近 5 年序列中的 percentile rank」，与滚动归一化分位是两个不同指标。<br>
+归一化分位参照 <code>wj624/etf-lsi</code>：每个点取自身及之前 N 个交易日的极值做 min-max 映射到 0-100，N 默认 __PCTWINDOW__（250 日滚动），图 2 可切换为 __PCTWIN5Y__（约 5 年全序列滚动）。两种都是「当日及之前」的滚动窗口，不使用未来极值，也不按图表缩放窗口重算；5 年周期看长期历史位置，但近端波动会被压平。Spread = MA200 占比分位 − 基准指数分位（−100 ~ +100），正红负绿、±__SPREADBIG__ 为大劈叉；这是形状对比，不是收益率。头部百分位是「当前 MA200 占比在近 5 年序列中的 percentile rank」，与滚动归一化分位是两个不同指标。<br>
 ⚠️ 5 年历史是用「当前股票池」回算的，早期存在幸存者偏差（当时未上市 / 现已退市的股票不在池内），越往前偏差越大，不可表述为「当时的真实全市场宽度」。<br>
 CSV 滚动保留 __MAXROWS__ 个交易日；docs/ 超过 __MAXMB__ MB 自动裁剪。GitHub Actions 生成于 __GEN__（北京时间）；仅为公开数据统计结果，不构成投资建议。
 </div>
@@ -584,6 +596,7 @@ var COLORS = {'50':'#e0972f','200':'#d64545'};
 var IDX_KEYS = Object.keys(DATA.indices || {});
 var rawMode = false, autoY = false, bigFrame = false;
 var curStart = 0, curEnd = 100, benchKey = 'hs300', CUR_SPREAD = [];
+var pctWin = '250';   // '250' = 默认滚动 250 日；'5y' = 5 年全序列滚动窗口
 var chart = null, idxChart = null, subChart = null;
 
 function fmt(v, suffix) {
@@ -596,8 +609,20 @@ function bounds(startPct, endPct) {
   if (y <= x) { y = Math.min(n - 1, x + 1); }
   return [x, y];
 }
+// 两套分位都由 Python 端用同一个 rolling_minmax_pct() 算好烤进 payload，
+// 前端只切换「取哪一套」，绝不在浏览器里重算（防止口径漂移 / 前视偏差 / 缩放后重算）。
+function curP200Pct(){ return pctWin === '5y' ? (DATA.p200Pct5y || []) : (DATA.p200Pct || []); }
+function curIdxPct(k){
+  var m = pctWin === '5y' ? (DATA.indexPct5y || {}) : (DATA.indexPct || {});
+  return m[k] || [];
+}
+function pctWinLabel(){
+  return pctWin === '5y'
+    ? '滚动 ' + DATA.pctWindow5y + ' 个交易日（约 5 年）'
+    : '滚动 ' + DATA.pctWindow + ' 个交易日';
+}
 function spreadArray() {
-  var a = DATA.p200Pct || [], b = DATA.indexPct[benchKey] || [];
+  var a = curP200Pct(), b = curIdxPct(benchKey);
   return a.map(function (v, i) {
     return (v == null || b[i] == null) ? null : +(v - b[i]).toFixed(2);
   });
@@ -644,11 +669,11 @@ function originalIndexSeries(startPct, endPct) {
 }
 function pctSeries() {
   var out = [{id:'p200pct', name:'MA200 占比分位', type:'line', yAxisIndex:0, z:6,
-    data: DATA.p200Pct, showSymbol:false, smooth:true, connectNulls:true,
+    data: curP200Pct(), showSymbol:false, smooth:true, connectNulls:true,
     lineStyle:{width:2.8,color:'#d64545'}, itemStyle:{color:'#d64545'}}];
   IDX_KEYS.forEach(function(k){
     out.push({id:'idx_'+k, name: DATA.indexNames[k]+' 分位', type:'line', yAxisIndex:0, z:5,
-      data: DATA.indexPct[k]||[], showSymbol:false, smooth:true, connectNulls:true,
+      data: curIdxPct(k), showSymbol:false, smooth:true, connectNulls:true,
       lineStyle:{width:1.7,color:DATA.indexColors[k]}, itemStyle:{color:DATA.indexColors[k]}});
   });
   return out;
@@ -676,9 +701,10 @@ function rawSeries(startPct, endPct) {
 function idxTooltip(ps) {
   if (!ps || !ps.length) return '';
   var i = ps[0].dataIndex, out = ['<b>'+DATA.dates[i]+'</b>'];
-  out.push('MA200 占比：'+fmt(DATA.p200Values[i],'%')+'　分位：'+fmt(DATA.p200Pct[i]));
+  out.push('<span style="color:#8a93a3">归一化窗口：'+pctWinLabel()+'</span>');
+  out.push('MA200 占比：'+fmt(DATA.p200Values[i],'%')+'　分位：'+fmt(curP200Pct()[i]));
   IDX_KEYS.forEach(function(k){
-    out.push(DATA.indexNames[k]+'：'+fmt(DATA.indices[k][i])+'　分位：'+fmt(DATA.indexPct[k][i]));
+    out.push(DATA.indexNames[k]+'：'+fmt(DATA.indices[k][i])+'　分位：'+fmt(curIdxPct(k)[i]));
   });
   var sp = CUR_SPREAD[i];
   if (sp != null) {
@@ -824,6 +850,19 @@ function wireControls() {
   document.querySelectorAll('.ctl button[data-days]').forEach(function (b) {
     b.onclick = function () { setRange(+this.getAttribute('data-days')); };
   });
+  document.querySelectorAll('.ctl2 button[data-pct]').forEach(function (b) {
+    b.onclick = function () {
+      pctWin = b.getAttribute('data-pct');
+      document.querySelectorAll('.ctl2 button[data-pct]').forEach(function (x) {
+        x.classList.toggle('on', x === b);
+      });
+      document.getElementById('pctHint').textContent = pctWin === '5y'
+        ? '5 年全序列滚动窗口：看长期历史位置，近端波动会被压平'
+        : '默认：近 250 个交易日的相对位置，适合看中短期背离';
+      document.getElementById('pctWinDesc').textContent = pctWinLabel();
+      refreshIdx();   // 重算 Spread + 重建曲线；图例勾选由 idxLegendSelected() 保留
+    };
+  });
   document.getElementById('axisBtn').onclick = function () {
     rawMode = !rawMode;
     this.textContent = rawMode ? '显示归一化分位' : '显示原始走势';
@@ -882,8 +921,11 @@ def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
         "indices": res.get("indices", {}),
         "p200Pct": res.get("p200_pct", []),
         "indexPct": res.get("index_pct", {}),
+        "p200Pct5y": res.get("p200_pct_5y", []),
+        "indexPct5y": res.get("index_pct_5y", {}),
         "p200Values": res.get("p200_values", []),
         "pctWindow": PCT_WINDOW,
+        "pctWindow5y": PCT_WINDOW_5Y,
         "spreadBig": SPREAD_BIG,
         "indexNames": res.get("index_names", {}),
         "indexColors": res.get("index_colors", {}),
@@ -955,6 +997,7 @@ def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
             .replace("__NDAYS__", str(res["used_days"]))
             .replace("__MINBARS__", str(MIN_BARS))
             .replace("__PCTWINDOW__", str(PCT_WINDOW))
+            .replace("__PCTWIN5Y__", str(PCT_WINDOW_5Y))
             .replace("__SPREADBIG__", str(SPREAD_BIG))
             .replace("__MAXROWS__", str(MAX_CSV_ROWS))
             .replace("__MAXMB__", str(int(MAX_DIR_MB)))
