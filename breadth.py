@@ -534,14 +534,34 @@ h1{font-size:25px;margin:0 0 6px}h2{font-size:17px;margin:30px 0 10px}
 .ctl2{margin:-4px 0 10px}
 .pcthint{font-size:11px;color:#8a93a3;margin-left:2px}
 .panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px}
-#main{height:420px}#idx{height:320px}#sub{height:250px}
+#main{height:420px}#idx_sse,#idx_hs300,#idx_cyb{height:300px}
+h3{font-size:15px;margin:18px 0 6px;color:#1f2733}
+.idxwrap{margin-bottom:6px}
+.guid{color:#6b7688;font-size:12.5px;margin:0 0 8px;line-height:1.7;background:#f3f6fb;border:1px solid #e3e9f2;border-left:3px solid #2f6fd0;border-radius:8px;padding:8px 12px}
+.guidebox{background:#fff;border:1px solid var(--line);border-left:4px solid #e0972f;border-radius:10px;padding:13px 18px;margin:14px 0 6px}
+.gtitle{font-size:13px;font-weight:600;color:#1f2733;margin-bottom:6px}
+.gbody p{margin:5px 0;font-size:12.5px;line-height:1.75;color:#3a4250}
+.gbody b{color:#1f2733}
+.idxcards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:12px 0}
+.idxcard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+.ilab{color:var(--muted);font-size:12px}.ival{font-size:26px;font-weight:650;line-height:1.2;margin-top:3px}.ival span{font-size:13px;margin-left:2px}
+.isub{color:var(--muted);font-size:11.5px;margin-top:2px}
+.ibar{height:6px;background:#e9edf3;border-radius:4px;margin-top:9px;overflow:hidden}.ibar i{display:block;height:100%;background:linear-gradient(90deg,#1f9d6b 0%,#e0972f 50%,#d64545 100%)}
+.verdict{background:#fff;border:1px solid var(--line);border-left:5px solid #8a93a3;border-radius:10px;padding:14px 18px;margin:14px 0}
+.verdict.v-green{border-left-color:#1f9d6b}.verdict.v-amber{border-left-color:#e0972f}.verdict.v-red{border-left-color:#d64545}.verdict.v-neutral{border-left-color:#8a93a3}
+.vtag{display:inline-block;font-size:13px;font-weight:700;padding:3px 12px;border-radius:20px;margin-bottom:8px}
+.v-green .vtag{background:#e9f7f0;color:#1f7a4d}.v-amber .vtag{background:#fdf0dc;color:#9a6212}.v-red .vtag{background:#fdeaea;color:#b23b3b}.v-neutral .vtag{background:#eef0f4;color:#5a6473}
+.vhead{font-size:14px;font-weight:600;color:#1f2733;margin-bottom:3px}
+.vsub{font-size:13px;color:#3a4250;margin-bottom:6px}
+.vbody{font-size:12.5px;line-height:1.8;color:#3a4250}
+.vmeta{font-size:11.5px;color:#8a93a3;margin-top:8px;border-top:1px dashed #e3e7ee;padding-top:7px}
 select.ctlsel{border:1px solid #d8dde6;border-radius:6px;padding:5px 8px;background:#fff;color:#1f2733;font-size:12px;cursor:pointer}
 table{width:100%;border-collapse:collapse;background:var(--card);font-size:12px}
 th,td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
 th{background:#f1f3f7;color:var(--muted);font-weight:600}th:first-child,td:first-child{text-align:left}
 .src{color:var(--muted);font-size:12px;margin-top:20px;border-top:1px solid var(--line);padding-top:12px}
 code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:12px}
-@media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}.wrap{padding:18px 12px 40px}.hint,.pcthint{display:none}#main{height:360px}#idx{height:300px}.pbbig{font-size:30px}.headrow{align-items:flex-start}.datebadge{white-space:normal}.dbtop b{font-size:15px}}
+@media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}.wrap{padding:18px 12px 40px}.hint,.pcthint{display:none}#main{height:360px}#idx_sse,#idx_hs300,#idx_cyb{height:260px}.pbbig{font-size:30px}.headrow{align-items:flex-start}.datebadge{white-space:normal}.dbtop b{font-size:15px}.idxcards{grid-template-columns:repeat(1,1fr)}}
 </style></head><body><div class="wrap">
 <div class="headrow">
   <h1>A 股市场宽度 · S5TH 云端版</h1>
@@ -553,6 +573,9 @@ code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:12px}
 <p class="lead">等权口径：A 股中「后复权收盘价站上 N 日均线」的占比。近 5 年历史，由 GitHub Actions 每交易日自动计算；主图只保留中长期 MA50 / MA200，指数另开一图做归一化背离对比。</p>
 <div class="cards">__CARDS__</div>
 __PCTBAND__
+__IDXCARD__
+__GUIDE__
+__VERDICT__
 __POOL__
 __AUX__
 <h2>宽度曲线（中长期）</h2>
@@ -560,28 +583,14 @@ __AUX__
   <b>区间</b>
   <button data-days="125">半年</button><button data-days="250">1 年</button>
   <button data-days="750">3 年</button><button data-days="1300" class="on">5 年</button>
-  <b>指数</b><button id="axisBtn">显示原始走势</button>
-  <b>背离基准</b><select id="benchSel" class="ctlsel">
-    <option value="hs300">沪深300</option><option value="sse">上证综指</option><option value="cyb">创业板指</option>
-  </select>
   <b>图框</b><button id="sizeBtn">放大图框</button>
   <b>纵轴</b><button id="yBtn">纵轴自适应</button>
-  <span class="hint">三图联动 · 鼠标滚轮缩放 · 拖动滑块平移 · 图例可勾选显隐</span>
+  <span class="hint">四图联动 · 鼠标滚轮缩放 · 拖动滑块平移 · 图例可勾选显隐</span>
 </div>
 <div class="panel"><div id="main"></div></div>
-<h2>三大指数 与 MA200 占比 · 归一化背离对比</h2>
-<div class="ctl ctl2">
-  <b>归一化周期</b>
-  <button data-pct="250">250 日滚动</button>
-  <button data-pct="5y" class="on">5 年周期</button>
-  <span class="pcthint" id="pctHint">5 年全序列滚动窗口：看长期历史位置，近端波动会被压平</span>
-</div>
-<p class="spread-note"><b id="pctWinDesc">滚动 __PCTWIN5Y__ 个交易日（约 5 年）</b> min-max 归一化到 0-100（只用当日及之前数据，口径不随图表缩放漂移；可在上方切换周期）。背景 Spread = MA200 占比分位 − <b id="benchName">沪深300</b> 分位：<b style="color:#E8453C">正值红（宽度领先）</b> / <b style="color:#1FB37A">负值绿（指数领先）</b>，|Spread| ≥ __SPREADBIG__ 为大劈叉。悬停查看每日明细。</p>
-<div class="panel"><div id="idx"></div></div>
-<h2>涨跌家数 与 McClellan 振荡器</h2>
-<div class="panel"><div id="sub"></div></div>
+__IDXSECT__
 <h2>最近 15 个交易日</h2>
-<table><thead><tr><th>日期</th><th>样本数</th><th>&gt;MA5</th><th>&gt;MA20</th><th>&gt;MA50</th><th>&gt;MA200</th><th>上涨</th><th>下跌</th><th>McClellan</th></tr></thead><tbody>__TRS__</tbody></table>
+<table><thead><tr><th>日期</th><th>样本数</th><th>&gt;MA5</th><th>&gt;MA20</th><th>&gt;MA50</th><th>&gt;MA200</th><th>上涨</th><th>下跌</th></tr></thead><tbody>__TRS__</tbody></table>
 <div class="src">
 主数据源：AKShare → 东方财富 <code>stock_zh_a_spot_em</code>（代码清单主源）→ <code>stock_info_a_code_name</code>（备用源）→ <code>codes.txt</code>（带日期兜底）+ <code>stock_zh_a_hist(adjust="hfq")</code>（逐只后复权日线）+ <code>index_zh_a_hist</code>（沪深300 / 上证综指 / 创业板指）。辅助校验：<code>a-stock-api /api/market-breadth</code> 当日快照（不参与均线计算）。<br>
 数据截止 <b>__LATEST__</b>；成功取数 <b>__NFETCH__</b> 只、计入计算 <b>__NVALID__</b> 只、本次序列 <b>__NDAYS__</b> 个交易日。等权、含北交所/科创创业、ST 未单独剔除。股票池由每日在线清单自动纳入新股、剔除退市股；上市满 __MINBARS__ 根日线进入 MA5/20/50 宽度，满 200 根进入 MA200 宽度；停牌日不计入分母。<br>
@@ -595,9 +604,10 @@ var DATA = __PAYLOAD__;
 var COLORS = {'50':'#e0972f','200':'#d64545'};
 var IDX_KEYS = Object.keys(DATA.indices || {});
 var rawMode = false, autoY = false, bigFrame = false;
-var curStart = 0, curEnd = 100, benchKey = 'hs300', CUR_SPREAD = [];
-var pctWin = '5y';    // 默认 5 年全序列滚动窗口；'250' = 250 日滚动
-var chart = null, idxChart = null, subChart = null;
+var curStart = 0, curEnd = 100, pctWin = '5y';    // 默认 5 年全序列滚动窗口；'250' = 250 日滚动
+var chart = null;
+var idxCharts = [];        // [{key, el, chart}]
+var curSpreadMap = {};     // key -> 当前 Spread 序列（供 tooltip）
 
 function fmt(v, suffix) {
   return (v == null || isNaN(v)) ? '—' : (+v).toFixed(2) + (suffix || '');
@@ -621,8 +631,8 @@ function pctWinLabel(){
     ? '滚动 ' + DATA.pctWindow5y + ' 个交易日（约 5 年）'
     : '滚动 ' + DATA.pctWindow + ' 个交易日';
 }
-function spreadArray() {
-  var a = curP200Pct(), b = curIdxPct(benchKey);
+function spreadArrayOf(k) {
+  var a = curP200Pct(), b = curIdxPct(k);
   return a.map(function (v, i) {
     return (v == null || b[i] == null) ? null : +(v - b[i]).toFixed(2);
   });
@@ -632,11 +642,11 @@ function spreadArray() {
 // 用户手动勾选后以图表实例的真实 selected 为准（不依赖 legendselectchanged 事件，
 // 因此无论点击图例还是脚本 dispatchAction 都能保留）。切换「分位 / 基准 100」
 // 时 series 名称会变，这里按指数 key 在两套命名之间做映射，避免选择被重置。
-function idxLegendSelected() {
+function makeIdxLegend(chart, key) {
   var cur = {};
   try {
-    if (idxChart) {
-      var op = idxChart.getOption();
+    if (chart) {
+      var op = chart.getOption();
       if (op && op.legend && op.legend[0] && op.legend[0].selected) {
         cur = op.legend[0].selected || {};
       }
@@ -649,71 +659,65 @@ function idxLegendSelected() {
   }
   var suffix = rawMode ? '（基准 100）' : ' 分位';
   var s = {};
-  IDX_KEYS.forEach(function(k){
-    s[DATA.indexNames[k] + suffix] =
-      pick(DATA.indexNames[k] + ' 分位', DATA.indexNames[k] + '（基准 100）', k === 'hs300');
-  });
+  s[DATA.indexNames[key] + suffix] =
+    pick(DATA.indexNames[key] + ' 分位', DATA.indexNames[key] + '（基准 100）', true);
   s[rawMode ? 'MA200 占比' : 'MA200 占比分位'] =
     pick('MA200 占比分位', 'MA200 占比', rawMode ? true : false);
   return s;
 }
-function originalIndexSeries(startPct, endPct) {
+function originalIndexSeries(key, startPct, endPct) {
   var r = bounds(startPct, endPct), x = r[0], y = r[1];
-  return IDX_KEYS.map(function (k) {
-    var arr = DATA.indices[k], base = null;
-    for (var j = x; j <= y; j++) { if (arr[j] != null) { base = arr[j]; break; } }
-    return {id:'idx_'+k, name: DATA.indexNames[k]+'（基准 100）', type:'line', yAxisIndex:1,
-      data: arr.map(function(v){ return (v==null||!base)?null:+((v/base)*100).toFixed(2); }),
-      showSymbol:false, smooth:true, connectNulls:true,
-      lineStyle:{width:1.9,color:DATA.indexColors[k]}, itemStyle:{color:DATA.indexColors[k]}};
-  });
+  var arr = DATA.indices[key], base = null;
+  for (var j = x; j <= y; j++) { if (arr[j] != null) { base = arr[j]; break; } }
+  return {id:'idx_'+key, name: DATA.indexNames[key]+'（基准 100）', type:'line', yAxisIndex:1,
+    data: arr.map(function(v){ return (v==null||!base)?null:+((v/base)*100).toFixed(2); }),
+    showSymbol:false, smooth:true, connectNulls:true,
+    lineStyle:{width:1.9,color:DATA.indexColors[key]}, itemStyle:{color:DATA.indexColors[key]}};
 }
-function pctSeries() {
+function pctSeriesFor(key) {
   var out = [{id:'p200pct', name:'MA200 占比分位', type:'line', yAxisIndex:0, z:6,
     data: curP200Pct(), showSymbol:false, smooth:true, connectNulls:true,
     lineStyle:{width:2.8,color:'#d64545'}, itemStyle:{color:'#d64545'}}];
-  IDX_KEYS.forEach(function(k){
-    out.push({id:'idx_'+k, name: DATA.indexNames[k]+' 分位', type:'line', yAxisIndex:0, z:5,
-      data: curIdxPct(k), showSymbol:false, smooth:true, connectNulls:true,
-      lineStyle:{width:1.7,color:DATA.indexColors[k]}, itemStyle:{color:DATA.indexColors[k]}});
-  });
+  out.push({id:'idx_'+key, name: DATA.indexNames[key]+' 分位', type:'line', yAxisIndex:0, z:5,
+    data: curIdxPct(key), showSymbol:false, smooth:true, connectNulls:true,
+    lineStyle:{width:1.9,color:DATA.indexColors[key]}, itemStyle:{color:DATA.indexColors[key]}});
   return out;
 }
-function spreadSeries() {
+function spreadSeriesFor(key, spread) {
   return [
-    {name:'Spread 背景', type:'bar', yAxisIndex:1, z:1, data:CUR_SPREAD, barWidth:'100%', silent:true,
+    {name:'Spread 背景', type:'bar', yAxisIndex:1, z:1, data:spread, barWidth:'100%', silent:true,
      itemStyle:{color:function(p){
        if (p.value == null) return 'rgba(0,0,0,0)';
        return p.value >= 0 ? 'rgba(232,69,60,0.20)' : 'rgba(31,159,107,0.20)';
      }}},
-    {name:'Spread', type:'line', yAxisIndex:1, z:2, data:CUR_SPREAD, showSymbol:false,
+    {name:'Spread', type:'line', yAxisIndex:1, z:2, data:spread, showSymbol:false,
      lineStyle:{width:1,color:'rgba(107,118,136,0.55)'}, itemStyle:{color:'#6b7688'},
      markLine:{silent:true, symbol:'none', label:{show:false},
        lineStyle:{type:'dashed',width:1,color:'#aab2c0'},
        data:[{yAxis:DATA.spreadBig},{yAxis:-DATA.spreadBig},{yAxis:0,lineStyle:{color:'#c9ced8',width:1}}]}}
   ];
 }
-function rawSeries(startPct, endPct) {
+function rawSeriesFor(key, startPct, endPct) {
   var s = [{id:'p200raw', name:'MA200 占比', type:'line', yAxisIndex:0, z:6,
     data: DATA.p200Values, showSymbol:false, smooth:true, connectNulls:true,
     lineStyle:{width:2.8,color:'#d64545'}, itemStyle:{color:'#d64545'}}];
-  return s.concat(originalIndexSeries(startPct, endPct));
+  return s.concat([originalIndexSeries(key, startPct, endPct)]);
 }
-function idxTooltip(ps) {
-  if (!ps || !ps.length) return '';
-  var i = ps[0].dataIndex, out = ['<b>'+DATA.dates[i]+'</b>'];
-  out.push('<span style="color:#8a93a3">归一化窗口：'+pctWinLabel()+'</span>');
-  out.push('MA200 占比：'+fmt(DATA.p200Values[i],'%')+'　分位：'+fmt(curP200Pct()[i]));
-  IDX_KEYS.forEach(function(k){
-    out.push(DATA.indexNames[k]+'：'+fmt(DATA.indices[k][i])+'　分位：'+fmt(curIdxPct(k)[i]));
-  });
-  var sp = CUR_SPREAD[i];
-  if (sp != null) {
-    var col = sp >= 0 ? '#E8453C' : '#1FB37A';
-    var tag = Math.abs(sp) >= DATA.spreadBig ? ' · 大劈叉' : '';
-    out.push('<span style="color:'+col+'">Spread（vs '+DATA.indexNames[benchKey]+'）：'+(sp>0?'+':'')+sp.toFixed(1)+tag+'</span>');
-  }
-  return out.join('<br>');
+function idxTooltipFor(key) {
+  return function(ps) {
+    if (!ps || !ps.length) return '';
+    var i = ps[0].dataIndex, out = ['<b>'+DATA.dates[i]+'</b>'];
+    out.push('<span style="color:#8a93a3">归一化窗口：'+pctWinLabel()+'</span>');
+    out.push('MA200 占比：'+fmt(DATA.p200Values[i],'%')+'　分位：'+fmt(curP200Pct()[i]));
+    out.push(DATA.indexNames[key]+'：'+fmt(DATA.indices[key][i])+'　分位：'+fmt(curIdxPct(key)[i]));
+    var sp = (curSpreadMap[key] || [])[i];
+    if (sp != null) {
+      var col = sp >= 0 ? '#E8453C' : '#1FB37A';
+      var tag = Math.abs(sp) >= DATA.spreadBig ? ' · 大劈叉' : '';
+      out.push('<span style="color:'+col+'">Spread（vs '+DATA.indexNames[key]+'）：'+(sp>0?'+':'')+sp.toFixed(1)+tag+'</span>');
+    }
+    return out.join('<br>');
+  };
 }
 
 function mainChart() {
@@ -742,18 +746,19 @@ function mainChart() {
   chart.on('dataZoom', function(p){
     var d = p.batch ? p.batch[0] : p;
     if (d && d.start != null) { curStart=d.start; curEnd=d.end; }
-    if (rawMode && idxChart) refreshIdx();
+    if (rawMode && idxCharts.length) refreshAll();
   });
 }
 
-function idxChartInit() {
-  var el = document.getElementById('idx');
-  if (typeof echarts === 'undefined') { el.innerHTML='<p style="color:#6b7688">图表库未加载（离线）。</p>'; return; }
-  idxChart = echarts.init(el);
-  CUR_SPREAD = spreadArray();
-  idxChart.setOption({
-    animation:false, tooltip:{trigger:'axis',formatter:idxTooltip},
-    legend:{top:0,textStyle:{color:'#1f2733'},selected:idxLegendSelected()},
+function buildIdxChart(cfg) {
+  var el = document.getElementById(cfg.el);
+  if (typeof echarts === 'undefined') { el.innerHTML='<p style="color:#6b7688">图表库未加载（离线），请查看下方数据表。</p>'; return; }
+  var chart = echarts.init(el);
+  var spread = spreadArrayOf(cfg.key);
+  curSpreadMap[cfg.key] = spread;
+  chart.setOption({
+    animation:false, tooltip:{trigger:'axis',formatter:idxTooltipFor(cfg.key)},
+    legend:{top:0,textStyle:{color:'#1f2733'},selected:makeIdxLegend(chart, cfg.key)},
     grid:{left:52,right:58,top:44,bottom:56},
     xAxis:{type:'category',data:DATA.dates,axisLabel:{color:'#6b7688'},axisLine:{lineStyle:{color:'#e6e9ef'}}},
     yAxis:[
@@ -764,55 +769,34 @@ function idxChartInit() {
       {type:'inside',xAxisIndex:0,zoomOnMouseWheel:true,moveOnMouseMove:true,moveOnMouseWheel:false},
       {type:'slider',xAxisIndex:0,bottom:10,height:18,borderColor:'#e6e9ef',fillerColor:'rgba(47,111,208,0.12)'}
     ],
-    series: pctSeries().concat(spreadSeries())
+    series: pctSeriesFor(cfg.key).concat(spreadSeriesFor(cfg.key, spread))
   });
-  // 不挂 legendselectchanged：显隐状态由 idxLegendSelected() 从 getOption() 读取，
-  // 可覆盖点击与 dispatchAction 两种来源，也避免与 setOption 的 selected 互相打架。
+  cfg.chart = chart;
 }
 
-function subChartInit() {
-  var el = document.getElementById('sub');
-  if (typeof echarts === 'undefined') return;
-  subChart = echarts.init(el);
-  subChart.setOption({
-    animation:false, tooltip:{trigger:'axis'}, legend:{top:0, textStyle:{color:'#1f2733'}},
-    grid:{left:60, right:60, top:38, bottom:58},
-    xAxis:{type:'category', data: DATA.dates, axisLabel:{color:'#6b7688'}},
-    yAxis:[{type:'value', name:'家数', axisLabel:{color:'#6b7688'}, splitLine:{lineStyle:{color:'#eef0f4'}}},
-           {type:'value', name:'McClellan', axisLabel:{color:'#6b7688'}, splitLine:{show:false}}],
-    dataZoom:[
-      {type:'inside', xAxisIndex:0, zoomOnMouseWheel:true, moveOnMouseMove:true, moveOnMouseWheel:false},
-      {type:'slider', xAxisIndex:0, bottom:10, height:18}
-    ],
-    series:[
-      {name:'上涨家数', type:'bar', stack:'ad', data: DATA.adv, itemStyle:{color:'#d64545'}},
-      {name:'下跌家数', type:'bar', stack:'ad', data: DATA.dec, itemStyle:{color:'#1f9d6b'}},
-      {name:'McClellan', type:'line', yAxisIndex:1, data: DATA.mc, showSymbol:false, smooth:true,
-       lineStyle:{width:1.8, color:'#2f6fd0'}, itemStyle:{color:'#2f6fd0'}}
-    ]
-  });
-}
-
-function refreshIdx() {
-  if (!idxChart) return;
-  var sel = idxLegendSelected();
+function refreshIdxChart(cfg) {
+  var chart = cfg.chart; if (!chart) return;
+  var sel = makeIdxLegend(chart, cfg.key);
   if (rawMode) {
-    CUR_SPREAD = [];
-    idxChart.setOption({legend:{selected:sel}, yAxis:[{},{name:'指数（基准 100）',min:'dataMin',max:'dataMax'}]});
-    idxChart.setOption({series: rawSeries(curStart, curEnd)}, {replaceMerge:['series']});
+    var spread = [];
+    curSpreadMap[cfg.key] = spread;
+    chart.setOption({legend:{selected:sel}, yAxis:[{},{name:'指数（基准 100）',min:'dataMin',max:'dataMax'}]});
+    chart.setOption({series: rawSeriesFor(cfg.key, curStart, curEnd)}, {replaceMerge:['series']});
   } else {
-    CUR_SPREAD = spreadArray();
-    idxChart.setOption({legend:{selected:sel}, yAxis:[{},{name:'Spread',min:-100,max:100}]});
-    idxChart.setOption({series: pctSeries().concat(spreadSeries())}, {replaceMerge:['series']});
+    var spread = spreadArrayOf(cfg.key);
+    curSpreadMap[cfg.key] = spread;
+    chart.setOption({legend:{selected:sel}, yAxis:[{},{name:'Spread',min:-100,max:100}]});
+    chart.setOption({series: pctSeriesFor(cfg.key).concat(spreadSeriesFor(cfg.key, spread))}, {replaceMerge:['series']});
   }
 }
+function refreshAll() { idxCharts.forEach(refreshIdxChart); }
 
 function setRange(days) {
   var n = DATA.dates.length;
   var pct = Math.max(0, (n - days) / (n - 1) * 100);
   if (chart) chart.dispatchAction({type:'dataZoom', start:pct, end:100});
   curStart = pct; curEnd = 100;
-  if (rawMode) refreshIdx();
+  if (rawMode) refreshAll();
   document.querySelectorAll('.ctl button[data-days]').forEach(function (b) { b.classList.remove('on'); });
   var btn = document.querySelector('.ctl button[data-days="' + days + '"]');
   if (btn) btn.classList.add('on');
@@ -861,28 +845,23 @@ function wireControls() {
         ? '5 年全序列滚动窗口：看长期历史位置，近端波动会被压平'
         : '250 日滚动窗口：看中短期相对位置，对近期变化更敏感';
       document.getElementById('pctWinDesc').textContent = pctWinLabel();
-      refreshIdx();   // 重算 Spread + 重建曲线；图例勾选由 idxLegendSelected() 保留
+      refreshAll();   // 重算 Spread + 重建三张曲线；图例勾选由 makeIdxLegend() 保留
     };
   });
   document.getElementById('axisBtn').onclick = function () {
     rawMode = !rawMode;
     this.textContent = rawMode ? '显示归一化分位' : '显示原始走势';
     this.classList.toggle('on', rawMode);
-    refreshIdx();
-  };
-  document.getElementById('benchSel').onchange = function () {
-    benchKey = this.value;
-    document.getElementById('benchName').textContent = DATA.indexNames[benchKey];
-    if (!rawMode) refreshIdx();
+    refreshAll();
   };
   document.getElementById('sizeBtn').onclick = function () {
     bigFrame = !bigFrame;
     document.getElementById('main').style.height = bigFrame ? '680px' : '420px';
-    document.getElementById('idx').style.height = bigFrame ? '500px' : '320px';
+    idxCharts.forEach(function (c) { var el = document.getElementById(c.el); if (el) el.style.height = bigFrame ? '460px' : '300px'; });
     this.textContent = bigFrame ? '还原图框' : '放大图框';
     this.classList.toggle('on', bigFrame);
     if (chart) chart.resize();
-    if (idxChart) idxChart.resize();
+    idxCharts.forEach(function (c) { if (c.chart) c.chart.resize(); });
   };
   document.getElementById('yBtn').onclick = function () {
     autoY = !autoY;
@@ -892,14 +871,17 @@ function wireControls() {
   };
   window.addEventListener('resize', function () {
     if (chart) chart.resize();
-    if (idxChart) idxChart.resize();
-    if (subChart) subChart.resize();
+    idxCharts.forEach(function (c) { if (c.chart) c.chart.resize(); });
   });
 }
 
-mainChart(); idxChartInit(); subChartInit();
+var IDX_CONFIGS = (DATA.indices ? Object.keys(DATA.indices) : []).map(function (k) {
+  return {key: k, el: 'idx_' + k};
+});
+mainChart();
+IDX_CONFIGS.forEach(function (c) { buildIdxChart(c); idxCharts.push(c); });
 if (typeof echarts !== 'undefined') {
-  var g = [chart, idxChart, subChart].filter(Boolean);
+  var g = [chart].concat(idxCharts.map(function (c) { return c.chart; })).filter(Boolean);
   if (g.length > 1) echarts.connect(g);
 }
 wireControls();
@@ -908,17 +890,71 @@ markFreshness();
 </body></html>"""
 
 
+def build_verdict(b: float, idx: dict) -> tuple:
+    """基于 MA200 占比百分位 b 与三大指数百分位 idx，给出综合研判。
+    返回 (标签, 等级, 一句话摘要, 详细论证)。等级: green/amber/red/neutral。
+    阈值: LOW=20, HIGH=80；剪刀差收敛(<25)与出手规则见页内「指导说明」。"""
+    iv = list(idx.values())
+    if not iv:
+        return ("数据不足", "neutral", "指数数据缺失，无法研判。", "")
+    i_low_all = all(v < 20 for v in iv)
+    i_high_all = all(v > 80 for v in iv)
+    i_mid_all = all(v >= 20 for v in iv)   # 全部脱离 5 年低位（含高位）
+    b_low = b < 20
+    b_high = b > 80
+    b_mid = (not b_low) and (not b_high)
+    if b_low and i_low_all:
+        return ("极度超卖 · 历史低位区", "green",
+                "4 个百分位全部 < 20%：宽度与三大指数同步处在近 5 年底部。",
+                "这是历史上赔率最高的「黄金坑」区间（如 2018 年底、2020 年疫情坑、2024 年春节前）。"
+                "但「低位」不等于「立刻反转」——下行趋势仍可能延续（便宜可以更便宜）。"
+                "策略：分批左侧布局，并以「宽度回升 + 剪刀差收敛」作右侧加仓确认，不一把梭。")
+    if b_low and i_mid_all:
+        return ("指数抢跑 · 宽度滞后", "amber",
+                "三大指数已脱离 5 年低位（>20%），但 MA200 占比仍处底部（<20%）。",
+                "典型「指数领涨、宽度没跟上」——权重股拉抬指数，多数个股仍在 200 日线下方，"
+                "内部分化大、持续性存疑（剪刀差为负、宽度落后）。此时不宜追高；"
+                "若宽度始终跟不上，指数易回落补跌。耐心等宽度修复。")
+    if b_low:
+        return ("分化磨底 · 结构撕裂", "amber",
+                "MA200 占比仍在底部，但三大指数百分位分化（有的已脱离低位、有的仍低）。",
+                "市场处于过渡 / 震荡磨底阶段，主线不清晰。控制仓位、观望为主，"
+                "等待宽度与指数共振走强后再介入。")
+    if b_high and i_high_all:
+        return ("全面过热 · 风险积聚", "red",
+                "宽度与三大指数百分位全部 > 80%，近 5 年高位区。",
+                "市场情绪与仓位偏拥挤，均值回归风险上升。此时不是入场时机，"
+                "反而应警惕回调、考虑分批止盈 / 降仓。")
+    if b_high:
+        return ("宽度偏热 · 指数分化", "amber",
+                "MA200 占比已过热（>80%），但指数未同步到高位。",
+                "个股普涨但指数相对落后，可能处于阶段末端的 exhaustion（涨不动）。"
+                "不宜新开重仓，注意波动放大与兑现压力。")
+    if i_low_all:
+        return ("宽度领先 · 底部领先信号", "green",
+                "MA200 占比已脱离底部（>20%），但三大指数仍处 5 年低位（<20%）。",
+                "宽度（个股参与度）先于指数回暖，是底部常见的「宽度领涨」领先信号——"
+                "内部分歧转好往往先于价格反转。可积极关注、分批左侧建仓。")
+    if b_mid and i_high_all:
+        return ("普涨 · 接近过热", "amber",
+                "宽度与指数均脱离低位、且指数已近 5 年高位（>80%）。",
+                "趋势仍健康但赔率下降，只宜在回踩关键支撑时低吸，不再追高；"
+                "密切留意宽度是否率先见顶（顶部常由宽度恶化预告）。")
+    return ("常态参与 · 趋势进行中", "neutral",
+            "宽度与指数均处于 5 年中间区间（20%–80%），无极端信号。",
+            "市场处于正常运行的趋势 / 震荡中。策略：顺势而为、买回调不追涨；"
+            "真正的「便宜入手」机会要等百分位重新跌回低位，且剪刀差收敛"
+            "（|宽度−指数相对位置| < 25，即无大劈叉）后再分批考虑。")
+
+
 def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
     rows = res["rows"][-OUT_DAYS:]
     dates = [r["date"] for r in rows]
     payload = json.dumps({
         "dates": dates,
         "series": {str(n): [float(r[f"pct_above_{n}"]) for r in rows] for n in MA_WINDOWS},
-        "adv": [int(r["advancers"]) for r in rows],
-        "dec": [-int(r["decliners"]) for r in rows],
         "ema5": [float(r.get("ema5_pct200") or 0) for r in rows],
         "emaLong": [float(r.get("ema_long_pct200") or 0) for r in rows],
-        "mc": [float(r.get("mcclellan") or 0) for r in rows],
         "indices": res.get("indices", {}),
         "p200Pct": res.get("p200_pct", []),
         "indexPct": res.get("index_pct", {}),
@@ -949,7 +985,7 @@ def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
     trs = "".join(
         "<tr>" + "".join(f"<td>{r[k]}</td>" for k in
                          ["date", "n_stocks", "pct_above_5", "pct_above_20",
-                          "pct_above_50", "pct_above_200", "advancers", "decliners", "mcclellan"])
+                          "pct_above_50", "pct_above_200", "advancers", "decliners"])
         + "</tr>" for r in reversed(rows[-15:]))
 
     src = pool.get("source", "unknown")
@@ -970,9 +1006,11 @@ def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
                      f'上市满 {MIN_BARS} 根日线进入 MA5/20/50 宽度，满 200 根进入 MA200 宽度。</div>')
 
     vals = [float(v) for v in res.get("p200_values", []) if v is not None]
+    b_rank = None
     if vals:
         cur = vals[-1]
         rank = 100.0 * sum(1 for v in vals if v <= cur) / len(vals)
+        b_rank = rank
         lo, hi = min(vals), max(vals)
         med = sorted(vals)[len(vals) // 2]
         pct_band = (
@@ -986,9 +1024,97 @@ def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
     else:
         pct_band = ''
 
+    # —— 指数近 5 年百分位（与 MA200% 百分位同类：当前值在历史序列中的 percentile rank）——
+    idx_rank = {}
+    idx_stats = {}
+    for k, arr in (res.get("indices") or {}).items():
+        xs = [float(v) for v in arr if v is not None]
+        if xs:
+            c = xs[-1]
+            rk = 100.0 * sum(1 for v in xs if v <= c) / len(xs)
+            idx_rank[k] = rk
+            idx_stats[k] = (rk, c, min(xs), max(xs), sorted(xs)[len(xs) // 2])
+
+    idx_cards = ""
+    for k in ("sse", "hs300", "cyb"):
+        if k in idx_stats:
+            rk, c, lo, hi, med = idx_stats[k]
+            name = res.get("index_names", {}).get(k, k)
+            idx_cards += (
+                '<div class="idxcard"><div class="ilab">' + name + ' · 近 5 年百分位</div>'
+                '<div class="ival">' + f'{rk:.1f}' + '<span>%</span></div>'
+                '<div class="isub">当前 ' + f'{c:,.0f}' + ' · 5 年区间 ' + f'{lo:,.0f}' + '~' + f'{hi:,.0f}' +
+                ' · 中位 ' + f'{med:,.0f}' + '</div>'
+                '<div class="ibar"><i style="width:' + f'{rk:.1f}%' + '"></i></div></div>')
+    idx_card_html = '<div class="idxcards">' + idx_cards + '</div>' if idx_cards else ''
+
+    # —— 指导说明（用法说明：怎么读 4 个百分位 & 出手规则）——
+    guide_html = (
+        '<div class="guidebox"><div class="gtitle">怎么读这 4 个百分位 &amp; 出手规则（用法说明）</div>'
+        '<div class="gbody">'
+        '<p><b>4 个百分位（都是近 5 年 percentile rank，0-100）：</b>头部百分位条里的 <b>MA200 占比</b> + 下方三张卡片的 '
+        '<b>上证综指 / 沪深300 / 创业板指</b>。数值越低 = 越接近 5 年低位（越便宜 / 超卖）；越高 = 越接近 5 年高位（越贵 / 过热）。'
+        '它们各自基于不同序列，彼此不可直接相减。</p>'
+        '<p><b>真正的「宽度 vs 指数」背离</b>看三张背离子图里的 <b>Spread</b> = MA200 占比分位 − 该指数分位：背景 '
+        '<b style="color:#E8453C">红（宽度领先）</b> / <b style="color:#1FB37A">绿（指数领先）</b>，'
+        '|<b>Spread</b>| ≥ 25 为大劈叉；|<b>Spread</b>| &lt; 25 即宽度与指数收敛、结构健康。</p>'
+        '<p><b>出手规则：</b>当某张子图 <b>|Spread| &lt; 25（收敛、无大劈叉）</b> 且 <b>对应指数百分位偏低（&lt;30%，最好 &lt;20%）</b> 时，'
+        '<b>分批</b>考虑入手；若出现「指数领涨、宽度滞后」的绿色大劈叉，是分化反弹，勿追。低位 ≠ 立刻反转，宜分批 + 以「宽度回升 / Spread 收敛」作右侧确认。'
+        '下方「结果判断栏」已按四百分位组合给出综合结论。</p>'
+        '</div></div>')
+
+    # —— 综合研判（结果栏目）——
+    verdict_html = ''
+    if b_rank is not None and idx_rank:
+        label, level, summary, detail = build_verdict(b_rank, idx_rank)
+        spread_repr = b_rank - sum(idx_rank.values()) / len(idx_rank)
+        names = res.get("index_names", {})
+        verdict_html = (
+            '<div class="verdict v-' + level + '">'
+            '<div class="vtag">' + label + '</div>'
+            '<div class="vhead">综合研判（基于 4 个百分位）</div>'
+            '<div class="vsub">' + summary + '</div>'
+            '<div class="vbody">' + detail + '</div>'
+            '<div class="vmeta">当前 · MA200 占比百分位 <b>' + f'{b_rank:.1f}%' + '</b>'
+            ' · ' + names.get("sse", "上证综指") + ' <b>' + f'{idx_rank.get("sse", 0):.1f}%' + '</b>'
+            ' · ' + names.get("hs300", "沪深300") + ' <b>' + f'{idx_rank.get("hs300", 0):.1f}%' + '</b>'
+            ' · ' + names.get("cyb", "创业板指") + ' <b>' + f'{idx_rank.get("cyb", 0):.1f}%' + '</b>'
+            ' · 宽度−指数相对位置差 <b>' + f'{spread_repr:+.1f}' + '</b>（|&lt;25| 视为收敛）</div>'
+            '</div>')
+
+    # —— 归一化背离对比：拆成 3 张独立子图（每张预绑定一个指数作背离基准）——
+    idx_sect_html = (
+        '<h2>三大指数 与 MA200 占比 · 归一化背离对比（分图）</h2>'
+        '<div class="ctl ctl2">'
+        '  <b>归一化周期</b>'
+        '  <button data-pct="250">250 日滚动</button>'
+        '  <button data-pct="5y" class="on">5 年周期</button>'
+        '  <span class="pcthint" id="pctHint">5 年全序列滚动窗口：看长期历史位置，近端波动会被压平</span>'
+        '  <b style="margin-left:14px">视图</b><button id="axisBtn">显示原始走势</button>'
+        '</div>'
+        '<p class="spread-note"><b id="pctWinDesc">滚动 __PCTWIN5Y__ 个交易日（约 5 年）</b> min-max 归一化到 0-100'
+        '（只用当日及之前数据，口径不随图表缩放漂移；可切换周期）。每张子图背景 Spread = MA200 占比分位 − 该指数 占比分位：'
+        '<b style="color:#E8453C">正值红（宽度领先）</b> / <b style="color:#1FB37A">负值绿（指数领先）</b>，'
+        '|Spread| ≥ __SPREADBIG__ 为大劈叉。悬停查看每日明细。</p>')
+    for k in ("sse", "hs300", "cyb"):
+        if k in (res.get("indices") or {}):
+            name = res.get("index_names", {}).get(k, k)
+            idx_sect_html += (
+                '<div class="idxwrap">'
+                '<h3>' + name + ' 与 MA200 占比 · 归一化背离对比</h3>'
+                '<p class="guid">指导：当本图 <b>|Spread|&lt;25（无大劈叉、宽度与指数收敛）</b> 且 '
+                '<b>指数百分位偏低（&lt;30%，最好&lt;20%）</b> 时，分批考虑入手；'
+                '若出现「指数领涨宽度」的绿色大劈叉，则是分化反弹，勿追。</p>'
+                '<div class="panel"><div id="idx_' + k + '"></div></div>'
+                '</div>')
+
     html = (HTML_TEMPLATE
             .replace("__CARDS__", cards)
             .replace("__PCTBAND__", pct_band)
+            .replace("__IDXCARD__", idx_card_html)
+            .replace("__GUIDE__", guide_html)
+            .replace("__VERDICT__", verdict_html)
+            .replace("__IDXSECT__", idx_sect_html)
             .replace("__POOL__", pool_html)
             .replace("__AUX__", aux_html)
             .replace("__TRS__", trs)
