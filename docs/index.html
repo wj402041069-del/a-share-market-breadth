@@ -104,6 +104,35 @@ function spreadArray() {
     return (v == null || b[i] == null) ? null : +(v - b[i]).toFixed(2);
   });
 }
+// 默认：MA200 占比 + 沪深300 显示；上证 / 创业板默认关闭。
+// 用户手动勾选后以图表实例的真实 selected 为准（不依赖 legendselectchanged 事件，
+// 因此无论点击图例还是脚本 dispatchAction 都能保留）。切换「分位 / 基准 100」
+// 时 series 名称会变，这里按指数 key 在两套命名之间做映射，避免选择被重置。
+function idxLegendSelected() {
+  var cur = {};
+  try {
+    if (idxChart) {
+      var op = idxChart.getOption();
+      if (op && op.legend && op.legend[0] && op.legend[0].selected) {
+        cur = op.legend[0].selected || {};
+      }
+    }
+  } catch (e) { cur = {}; }
+  function pick(a, b, dft) {
+    if (a in cur) return cur[a];
+    if (b in cur) return cur[b];
+    return dft;
+  }
+  var suffix = rawMode ? '（基准 100）' : ' 分位';
+  var s = {};
+  IDX_KEYS.forEach(function(k){
+    s[DATA.indexNames[k] + suffix] =
+      pick(DATA.indexNames[k] + ' 分位', DATA.indexNames[k] + '（基准 100）', k === 'hs300');
+  });
+  s[rawMode ? 'MA200 占比' : 'MA200 占比分位'] =
+    pick('MA200 占比分位', 'MA200 占比', true);
+  return s;
+}
 function originalIndexSeries(startPct, endPct) {
   var r = bounds(startPct, endPct), x = r[0], y = r[1];
   return IDX_KEYS.map(function (k) {
@@ -174,7 +203,8 @@ function mainChart() {
   series.push({name:'MA200 占比长周期 EMA',type:'line',data:DATA.emaLong,smooth:true,
     showSymbol:false,lineStyle:{width:1.3,type:'dashed',color:'#8a93a3'},itemStyle:{color:'#8a93a3'}});
   chart.setOption({
-    animation:false, tooltip:{trigger:'axis'}, legend:{top:0,textStyle:{color:'#1f2733'}},
+    animation:false, tooltip:{trigger:'axis'},
+    legend:{top:0,textStyle:{color:'#1f2733'},selected:{'站上 50 日线':false}},
     grid:{left:52,right:24,top:46,bottom:64},
     xAxis:{type:'category',data:DATA.dates,axisLabel:{color:'#6b7688'},axisLine:{lineStyle:{color:'#e6e9ef'}}},
     yAxis:{type:'value',name:'宽度 %',min:0,max:100,axisLabel:{formatter:'{value}%',color:'#6b7688'},splitLine:{lineStyle:{color:'#eef0f4'}}},
@@ -198,7 +228,7 @@ function idxChartInit() {
   CUR_SPREAD = spreadArray();
   idxChart.setOption({
     animation:false, tooltip:{trigger:'axis',formatter:idxTooltip},
-    legend:{top:0,textStyle:{color:'#1f2733'}},
+    legend:{top:0,textStyle:{color:'#1f2733'},selected:idxLegendSelected()},
     grid:{left:52,right:58,top:44,bottom:56},
     xAxis:{type:'category',data:DATA.dates,axisLabel:{color:'#6b7688'},axisLine:{lineStyle:{color:'#e6e9ef'}}},
     yAxis:[
@@ -211,6 +241,8 @@ function idxChartInit() {
     ],
     series: pctSeries().concat(spreadSeries())
   });
+  // 不挂 legendselectchanged：显隐状态由 idxLegendSelected() 从 getOption() 读取，
+  // 可覆盖点击与 dispatchAction 两种来源，也避免与 setOption 的 selected 互相打架。
 }
 
 function subChartInit() {
@@ -238,13 +270,14 @@ function subChartInit() {
 
 function refreshIdx() {
   if (!idxChart) return;
+  var sel = idxLegendSelected();
   if (rawMode) {
     CUR_SPREAD = [];
-    idxChart.setOption({yAxis:[{},{name:'指数（基准 100）',min:'dataMin',max:'dataMax'}]});
+    idxChart.setOption({legend:{selected:sel}, yAxis:[{},{name:'指数（基准 100）',min:'dataMin',max:'dataMax'}]});
     idxChart.setOption({series: rawSeries(curStart, curEnd)}, {replaceMerge:['series']});
   } else {
     CUR_SPREAD = spreadArray();
-    idxChart.setOption({yAxis:[{},{name:'Spread',min:-100,max:100}]});
+    idxChart.setOption({legend:{selected:sel}, yAxis:[{},{name:'Spread',min:-100,max:100}]});
     idxChart.setOption({series: pctSeries().concat(spreadSeries())}, {replaceMerge:['series']});
   }
 }
