@@ -355,7 +355,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 
 ## 九、防 Bug 铁律（改动代码前必读）
 
-> **以下 18 条均来自真实踩坑，严禁回退。**
+> **以下 19 条均来自真实踩坑，严禁回退。**
 
 1. **必须用后复权 `adjust="hfq"`**。严禁用不复权收盘价直接算 MA：除权日会假跌破，实测 MA200 占比差约 3 个百分点（24.61% vs 27.57%）。
 2. **`codes.txt` 兜底不能删，且每个在线源都有写回下限**（主源 ≥3000、备用源 ≥5000 只）。push2 对云出口有 WAF 502；把异常小的快照写进兜底文件，等于把一次限流放大成长期数据空洞。**头部 `# updated | source | count` 注释行不能删**，`read_codes_meta()` 靠它判断陈旧、`read_codes_file()` 靠「首字符是数字」跳过它。
@@ -376,6 +376,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 17. **页面所有时间统一 `BJ_TZ`（UTC+8），不许用裸 `datetime.now()`**。GitHub Actions runner 是 UTC、本地开发机是北京时间，同一个 `generated_at` 曾因此含义不一致，足以让人误判数据新旧。新鲜度判断也一律用北京时间（`markFreshness()` / `bjNow()`），且只作辅助提示；**「数据日期」必须取 CSV 最后交易日 `__LATEST__`**，严禁用页面生成时间冒充数据日期，也别为消除节假日误报去接交易日历接口（会破坏静态页零外部依赖）。
 
 18. **图表容器的 `id`、CSS 选择器、`cfg.el` 三者必须一字不差地一致**。v3.7 曾踩坑：CSS 写成 `#idxSse,#idxHs,#idxCyb`（驼峰），而 JS 的 `cfg.el = 'idx_' + k` 与 HTML 的 `<div id="idx_...">` 实际是 `idx_sse / idx_hs300 / idx_cyb`，选择器永远匹配不到 → 三个背离子图容器高度塌陷为 0、图表不可见，但 `DATA` 正常、无 JS 报错，极难一眼看出。任何改动图表相关代码后，必须用 headless Chrome 确认每个 `#idx_*` 与 `#main` 的 `clientHeight > 0` 且 `echarts.getInstanceByDom` 能取到实例（验收口径见 5.4 / 12.3 第 8 条）。
+
+19. **数据新鲜度死信开关不能删、不能关、不能放宽**：`check_freshness.py` + `.github/workflows/freshness.yml` + 页面 `#staleBanner` 是一整套。判断口径（北京 18:30 分界、跳周末、`latest >= 应有交易日` 即新鲜）**必须与页面 `markFreshness()` 保持一致**——Python（CI 里跑）与 JS（浏览器里跑）是两份实现、故意不共享代码，所以**改一处必须同步另一处**。它零外部依赖、不依赖数据源在线，严禁改成依赖网络 / 交易日历接口；节假日误报属预期。`freshness.yml` 失败 = GitHub 给仓库所有者的「总告警」，**不许为了让检查变绿去改 CSV 日期或放宽阈值**，那是掩盖问题。
 
 > 另外两条工程经验：`docs/breadth.csv` 用 `utf-8-sig` 写 BOM，否则 Excel 打开中文表头乱码；本地通达信 `.day` 是 **32 字节小端**结构，早期解析踩过字节序坑（云端版不读 `.day`，但别把两套代码混着改）。
 
@@ -408,6 +410,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 **Q13：头部的「5 年百分位」和图 2 的「归一化分位」是一个东西吗？** 不是。头部是当前 MA200 占比在近 1300 个交易日中的 **percentile rank**（有多少比例的历史读数低于当前值）；图 2 的是**滚动 min-max 相对位置（默认 1300 日 / 约 5 年，250 日可切换）**，用来和指数分位相减得到 Spread。两者数值可能差很远，都正常，详见 5.2。
 
 **Q14：主图怎么只有两条线？MA5 / MA20 是不是没算了？** 仍在算：CSV、最近 15 日表、头部四张卡片都保留完整四档。只是应用户要求把短期噪声从主图移除，避免信号太乱。
+
+**Q15：页面顶部出现红色横幅 / 收到「数据过期」通知怎么办？** 这是**新鲜度死信开关**在工作：`freshness.yml` 每周三 / 周六（北京 09:30）断言 `docs/breadth.csv` 最后交易日，过期即 job 失败并向仓库所有者发通知，同时页面顶部显示红条。排查顺序：① 看 `freshness.yml` 日志里的 `latest / expected / gap`（直接告诉你停在哪天）；② 看 `breadth.yml` 最近几次是失败还是没跑（接口限流 / cron 未触发 / workflow 被 disable）；③ 到 Actions 手动 `Run workflow` 勾 `force=true` 重算，跑完确认 CSV 日期前进、横幅消失。春节 / 国庆长假空窗属正常。**别改 CSV 日期或放宽阈值来「变绿」**——那是掩盖可用性故障。完整步骤见 12.4-E。
 
 ## 十一、已知限制与免责声明
 
@@ -454,7 +458,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 - Worker 属于另一个仓库 `wj624/a-stock-api`，它没有逐股历史与复权，**严禁把它接成主数据源**。
 - 只要 `/api/market-breadth` 的 `date` 字段不变，本项目一行都不用改。
 
-### 12.3 九个必踩坑（按踩坑频率排序）
+### 12.3 十个必踩坑（按踩坑频率排序）
 
 1. **空数组 ≠ 没数据**：Worker 曾把上游失败吞成 `200 + {"data":[]}` 并缓存；本项目对应防线是 `MIN_VALID` / 取数下限 / 拒绝覆盖。任何新接口都要照这个模式写。
 2. **分母**：停牌日不计入、每档均线独立分母、上市不足 `MIN_BARS`(51) 根日线者整只剔除、未满 200 根者不进 MA200 分母。改错不会报错，只会让曲线悄悄偏低。
@@ -465,10 +469,11 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 7. **股票池静默冻结**：最隐蔽的失败不是报错，而是长期用旧 `codes.txt` 还显示绿色。任何改动 `get_codes()` / 幂等判断的代码，都必须保留「每次重拉清单 + 日期标记 + 超 7 天禁止跳过 + 降级橙色告警」，否则新上市股票会永远进不来且无人察觉。
 8. **归一化分位窗口**：`rolling_minmax_pct()` 只接受「当日及之前」的滚动窗口（250 默认 / 1300 可选），不能整段固定 min-max，也不能按图表显示窗口算，更不能把两套分位挪到前端实时算（会出现前视偏差或缩放漂移）。新增周期时两套都要在 Python 端算好写进 payload。3 张背离子图切换 series 必须带 `replaceMerge:['series']`，否则 `setOption` 的 merge 会留下旧曲线，看起来像「切换没生效」或出现幽灵线。改完务必用 headless Chrome 加载 `docs/index.html`，确认 **4 个 `<canvas>`（主图 + 3 张子图）**、两种周期切换后 Spread 末值确实不同、控制台无 JS 异常，且每个 `#idx_*` / `#main` 容器 `clientHeight > 0`（曾因 CSS 选择器与 div id 不匹配导致子图高度塌陷为 0，见第九章第 18 条）。
 9. **图例状态别用事件缓存**：`legendselectchanged` 对 `dispatchAction` 不触发，靠它存偏好会让「切换视图后手动勾选丢失」；读 `getOption().legend[0].selected` 才可靠。3 张背离子图两种视图的 series 名称不同（` 分位` / `（基准 100）`），重建图例时必须按指数 key 映射两套命名，否则默认关闭的 MA200 占比分位会被重新打开。改完要分别验证「零操作切换」与「手动勾选后切换」两种场景。
+10. **新鲜度死信开关别改坏**：`check_freshness.py`（Python）与页面 `markFreshness()`（JS）是同一套判断口径的两份实现（北京 18:30 分界、跳周末、`latest >= 应有交易日`），**改一处必须同步另一处**，否则会出现「CI 报警但页面显示最新」或反之。脚本故意零外部依赖、不依赖数据源在线——这正是数据源真挂了它还能报警的原因，严禁改成依赖网络。CSV 读取默认 `docs/breadth.csv`（可用 `CSV_PATH` 覆盖）；若哪天 `freshness.yml` 一直绿但数据其实很旧，八成是判断口径被改松或 CSV 路径读错。节假日 / 长假后首日会温和误报一次，属预期，不要接交易日历接口。
 
 **可调旋钮表见第八章**，改之前先确认是否同时需要改 `maintenance.yml` 的 `--max-rows`。
 
-### 12.4 四类常见任务的 SOP
+### 12.4 五类常见任务的 SOP
 
 **A. 上游接口变了 / akshare 升级**
 1. 本地跑 `--limit 300 --codes-file codes.txt --out test-out --force --min-valid 100`，确认 `df["日期"]` / `df["收盘"]` 字段名与单位没变。
@@ -489,6 +494,15 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 1. 红在 `Compute market breadth`：看是 `仅成功取到 N 只`（限流）还是 `有效样本不足`（上游异常），都不是「当天没行情」。
 2. 红在 `Commit report back to repo`：`git pull --rebase` 冲突，检查是不是有人手改了 `docs/`。
 3. 计算成功但页面没变：`git diff --cached --quiet` 命中，说明辅助源日期与 CSV 最后日期相同（非交易日 / 已跑过），这是正常幂等。
+4. 红在 `数据新鲜度检查（死信开关）`：这不是计算失败，而是「数据过期」的主动告警——按下面 E 处理。
+
+**E. 收到「数据过期」通知 / 页面出现红色横幅（新鲜度死信开关触发）**
+1. **先看 `freshness.yml` 最近一次 run 的日志**：脚本会打印 `now(BJ)` / `latest(data)` / `expected >=` / `gap`，直接告诉你数据停在哪天、差几个自然日，不用猜。
+2. **再看 `breadth.yml` 最近的 run**：是「红」（限流 / 上游异常，见 D.1）还是「根本没跑」（cron 未触发 / workflow 被 disable / 仓库长期无活动导致定时任务休眠）。
+3. **手动恢复**：Actions → A-share Market Breadth → Run workflow，勾 `force=true` 强制全量重算；跑完确认 `docs/breadth.csv` 最后日期已前进。
+4. **确认恢复**：等 1~2 分钟让 Pages 重建，`freshness.yml` 再跑一次应变绿、页面红色横幅消失。
+5. **别做**：为了变绿去改 `breadth.csv` 日期、放宽 `check_freshness.py` 阈值或关掉 workflow——那只会把「可用性故障」变成「数据正确性故障」。
+6. 若确认是长假（春节 / 国庆）正常空窗可忽略；连续多个交易日仍红，按 SOP A 查 akshare / 东财接口是否变更。
 
 ### 12.5 可复制给 AI 的提示词
 
@@ -499,8 +513,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 【先读什么】
 1. README 第三章「数据源、单位与剔除项」→ 认清主链路（AKShare 东财逐股后复权日线）
    与辅助链路（a-stock-api Worker 当日快照）。
-2. README 第九章「防 Bug 铁律」18 条 → 全部来自真实踩坑，禁止回退。
-3. README 第十二章 → 12.1 文件职责表、12.3 九个坑、12.4 SOP；改股票池前读 3.5，改图表前读第五章（尤其 5.4 默认显隐）。
+2. README 第九章「防 Bug 铁律」19 条 → 全部来自真实踩坑，禁止回退。
+3. README 第十二章 → 12.1 文件职责表、12.3 十个坑、12.4 SOP（尤其 E「数据过期怎么排查」）；改股票池前读 3.5，改图表前读第五章（尤其 5.4 默认显隐）。
 4. 要动 Worker 时读 https://github.com/wj624/a-stock-api 的 README。
 
 【硬约束，违反即算错】
@@ -521,6 +535,9 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
   不许用 legendselectchanged 事件缓存；3 张背离子图切换视图时按指数 key 映射两套 series 命名。
 - 标题旁「数据日期」取 CSV 最后交易日；页面生成时间统一 BJ_TZ(UTC+8)；
   新鲜度标签只是辅助提示，节假日会误报，不许接交易日历接口。
+- 新鲜度死信开关（check_freshness.py + freshness.yml + 页面 #staleBanner）不能删 / 放宽；
+  判断口径必须与页面 markFreshness() 一致（北京 18:30 分界、跳周末）；它零外部依赖、
+  不许改成依赖网络；收到「数据过期」通知按 12.4-E 排查，不许改 CSV 日期或放宽阈值。
 - 归一化分位两套窗口（250 / 1300）都必须是「当日及之前」滚动、由 Python 端算好烤进 payload；
   严禁整段固定 min-max、按显示窗口重算或放到前端算；**图 2（拆成 3 张独立子图）默认 5 年全序列（1300 日）、可切 250 日**，两套都由 `rolling_minmax_pct()` 在 Python 端算好。
 - 仓库内绝不写任何 PAT；CI 用 GITHUB_TOKEN。
@@ -535,6 +552,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
    4 个 canvas（主图 + 3 张子图）、图例默认显隐及切换视图后的状态保留（照 5.4 验收口径）。
 4. 全量跑一次，比对锚点：2026-09-21 MA200 ≈ 27.45%、2026-11-06 ≈ 12.07%。
 5. grep -R "ghp_|github_pat_" 确认无密钥；确认 docs/ 未超过 50MB 单文件护栏。
+6. python check_freshness.py  # 应输出 FRESH 且 exit 0（改过页面新鲜度口径后尤其要跑，确保 Python/JS 两套判断一致）。
 
 【提交规范】
 commit message 用中文，说明「改了什么 + 为什么」；涉及口径或常量的改动
