@@ -67,6 +67,8 @@ MAX_DIR_MB = 500
 SINGLE_FILE_MB = 50
 MIN_BARS = 51               # 进入计算所需最少日线（MA50 需 50 根 + 1）；改回 205 = 恢复「上市满 200 日才纳入」旧口径
 POOL_MAX_AGE_DAYS = 7       # codes.txt 超过该自然日数未刷新就禁止幂等跳过（覆盖春节/国庆长假）
+PCT_WINDOW = 250            # etf-lsi 归一化分位的滚动窗口（交易日）
+SPREAD_BIG = 25             # |Spread| 达到该值算「大劈叉」
 
 CODES_SNAPSHOT = "codes.txt"
 AUX_API = "https://a-stock-api.wj4020410.workers.dev"
@@ -291,6 +293,24 @@ def fetch_all(codes: list[str], start: str, end: str) -> dict:
 # ----------------------------------------------------------------------------
 # 计算
 # ----------------------------------------------------------------------------
+def rolling_minmax_pct(values: list, window: int = PCT_WINDOW) -> list:
+    """etf-lsi 口径的归一化分位：每个点取「自己 + 之前 window-1 个交易日」的
+    极值做 min-max 映射到 0-100。滚动窗口保证 5 年曲线近端不会被远端极值压平，
+    且不随图表缩放窗口变化（口径不漂移）。"""
+    out: list = []
+    for i, v in enumerate(values):
+        if v is None:
+            out.append(None)
+            continue
+        seg = [x for x in values[max(0, i - window + 1):i + 1] if x is not None]
+        if not seg:
+            out.append(None)
+            continue
+        mn, mx = min(seg), max(seg)
+        out.append(50.0 if mx == mn else round((v - mn) / (mx - mn) * 100.0, 2))
+    return out
+
+
 def rolling_mean(x: np.ndarray, n: int) -> np.ndarray:
     c = np.concatenate(([0.0], np.cumsum(x)))
     out = np.full(len(x), np.nan)
@@ -383,9 +403,14 @@ def compute(data: dict, idx_maps: dict) -> dict:
         if s:
             indices[key] = [s[t] for t in used]
 
+    p200_raw = [float(r["pct_above_200"]) if r["pct_above_200"] is not None else None
+                for r in rows]
     return {"rows": rows, "n_valid": kept, "n_fetched": len(data),
             "calendar_days": T, "used_days": len(rows),
             "indices": indices,
+            "p200_pct": rolling_minmax_pct(p200_raw),
+            "index_pct": {k: rolling_minmax_pct(v) for k, v in indices.items()},
+            "p200_values": p200_raw,
             "index_names": {k: v[1] for k, v in INDEXES.items()},
             "index_colors": {k: v[2] for k, v in INDEXES.items()},
             "latest": rows[-1]["date"] if rows else "",
@@ -473,6 +498,16 @@ h1{font-size:25px;margin:0 0 6px}h2{font-size:17px;margin:30px 0 10px}
 .aux{background:#eef4ff;border:1px solid #cfe0f7;color:#284b7a;padding:9px 13px;border-radius:8px;font-size:13px;margin-bottom:10px}
 .pool{background:#eef7f0;border:1px solid #cfe6d6;color:#235c3a;padding:9px 13px;border-radius:8px;font-size:13px;margin-bottom:10px}
 .pool.warn{background:#fff4e8;border-color:#f0cfa4;color:#8a5218}
+.pctband{background:linear-gradient(90deg,#fff 0%,#f6f9fd 100%);border:1px solid var(--line);border-left:4px solid #2f6fd0;border-radius:10px;padding:13px 18px;margin:14px 0 6px}
+.pbtitle{font-size:12px;color:var(--muted);margin-bottom:5px}
+.pbrow{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+.pbbig{font-size:38px;font-weight:700;line-height:1;color:#2f6fd0}
+.pbbig span{font-size:16px;margin-left:2px;font-weight:600}
+.pbdesc{font-size:13px;line-height:1.7}
+.pbdesc span{color:var(--muted);font-size:12px}
+.pbbar{height:7px;background:#e9edf3;border-radius:4px;margin-top:11px;overflow:hidden}
+.pbbar i{display:block;height:100%;background:linear-gradient(90deg,#1f9d6b 0%,#e0972f 50%,#d64545 100%)}
+.spread-note{color:var(--muted);font-size:12px;margin:-6px 0 12px}
 .ctl{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:10px 0 14px;font-size:12px;color:var(--muted)}
 .ctl b{color:var(--txt);font-weight:600;margin-left:6px}
 .ctl button{background:#fff;border:1px solid #d8dde6;color:#1f2733;border-radius:6px;padding:5px 11px;cursor:pointer;font-size:12px}
@@ -480,30 +515,38 @@ h1{font-size:25px;margin:0 0 6px}h2{font-size:17px;margin:30px 0 10px}
 .ctl button.on{background:#2f6fd0;border-color:#2f6fd0;color:#fff}
 .hint{margin-left:auto;font-size:11px;color:#8a93a3}
 .panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px}
-#main{height:420px}#sub{height:250px}
+#main{height:420px}#idx{height:320px}#sub{height:250px}
+select.ctlsel{border:1px solid #d8dde6;border-radius:6px;padding:5px 8px;background:#fff;color:#1f2733;font-size:12px;cursor:pointer}
 table{width:100%;border-collapse:collapse;background:var(--card);font-size:12px}
 th,td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
 th{background:#f1f3f7;color:var(--muted);font-weight:600}th:first-child,td:first-child{text-align:left}
 .src{color:var(--muted);font-size:12px;margin-top:20px;border-top:1px solid var(--line);padding-top:12px}
 code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:12px}
-@media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}.wrap{padding:18px 12px 40px}.hint{display:none}#main{height:360px}}
+@media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}.wrap{padding:18px 12px 40px}.hint{display:none}#main{height:360px}#idx{height:300px}.pbbig{font-size:30px}}
 </style></head><body><div class="wrap">
 <h1>A 股市场宽度 · S5TH 云端版</h1>
-<p class="lead">等权口径：A 股中「后复权收盘价站上 N 日均线」的占比。近 5 年历史，由 GitHub Actions 每交易日自动计算。</p>
+<p class="lead">等权口径：A 股中「后复权收盘价站上 N 日均线」的占比。近 5 年历史，由 GitHub Actions 每交易日自动计算；主图只保留中长期 MA50 / MA200，指数另开一图做归一化背离对比。</p>
 <div class="cards">__CARDS__</div>
+__PCTBAND__
 __POOL__
 __AUX__
-<h2>宽度曲线 与 三大指数对比</h2>
+<h2>宽度曲线（中长期）</h2>
 <div class="ctl">
   <b>区间</b>
   <button data-days="125">半年</button><button data-days="250">1 年</button>
   <button data-days="750">3 年</button><button data-days="1300" class="on">5 年</button>
-  <b>竖轴</b><button id="axisBtn">同竖轴对比</button>
+  <b>指数</b><button id="axisBtn">显示原始走势</button>
+  <b>背离基准</b><select id="benchSel" class="ctlsel">
+    <option value="hs300">沪深300</option><option value="sse">上证综指</option><option value="cyb">创业板指</option>
+  </select>
   <b>图框</b><button id="sizeBtn">放大图框</button>
   <b>纵轴</b><button id="yBtn">纵轴自适应</button>
-  <span class="hint">鼠标滚轮缩放 · 拖动底部滑块平移 · 图例可勾选显隐</span>
+  <span class="hint">三图联动 · 鼠标滚轮缩放 · 拖动滑块平移 · 图例可勾选显隐</span>
 </div>
 <div class="panel"><div id="main"></div></div>
+<h2>三大指数 与 MA200 占比 · 归一化背离对比</h2>
+<p class="spread-note">滚动 __PCTWINDOW__ 交易日 min-max 归一化到 0-100（口径不随图表缩放漂移）。背景 Spread = MA200 占比分位 − <b id="benchName">沪深300</b> 分位：<b style="color:#E8453C">正值红（宽度领先）</b> / <b style="color:#1FB37A">负值绿（指数领先）</b>，|Spread| ≥ __SPREADBIG__ 为大劈叉。悬停查看每日明细。</p>
+<div class="panel"><div id="idx"></div></div>
 <h2>涨跌家数 与 McClellan 振荡器</h2>
 <div class="panel"><div id="sub"></div></div>
 <h2>最近 15 个交易日</h2>
@@ -511,91 +554,141 @@ __AUX__
 <div class="src">
 主数据源：AKShare → 东方财富 <code>stock_zh_a_spot_em</code>（代码清单主源）→ <code>stock_info_a_code_name</code>（备用源）→ <code>codes.txt</code>（带日期兜底）+ <code>stock_zh_a_hist(adjust="hfq")</code>（逐只后复权日线）+ <code>index_zh_a_hist</code>（沪深300 / 上证综指 / 创业板指）。辅助校验：<code>a-stock-api /api/market-breadth</code> 当日快照（不参与均线计算）。<br>
 数据截止 <b>__LATEST__</b>；成功取数 <b>__NFETCH__</b> 只、计入计算 <b>__NVALID__</b> 只、本次序列 <b>__NDAYS__</b> 个交易日。等权、含北交所/科创创业、ST 未单独剔除。股票池由每日在线清单自动纳入新股、剔除退市股；上市满 __MINBARS__ 根日线进入 MA5/20/50 宽度，满 200 根进入 MA200 宽度；停牌日不计入分母。<br>
+归一化分位参照 <code>wj624/etf-lsi</code>：每个点取自身及之前 __PCTWINDOW__ 个交易日的极值做 min-max 映射到 0-100，Spread = MA200 占比分位 − 基准指数分位（−100 ~ +100），正红负绿、±__SPREADBIG__ 为大劈叉；这是形状对比，不是收益率。头部百分位是「当前 MA200 占比在近 5 年序列中的 percentile rank」，与滚动归一化分位是两个不同指标。<br>
 ⚠️ 5 年历史是用「当前股票池」回算的，早期存在幸存者偏差（当时未上市 / 现已退市的股票不在池内），越往前偏差越大，不可表述为「当时的真实全市场宽度」。<br>
 CSV 滚动保留 __MAXROWS__ 个交易日；docs/ 超过 __MAXMB__ MB 自动裁剪。GitHub Actions 生成于 __GEN__；仅为公开数据统计结果，不构成投资建议。
 </div>
 </div>
 <script>
 var DATA = __PAYLOAD__;
-var COLORS = {'5':'#8a63d2','20':'#2f6fd0','50':'#e0972f','200':'#d64545'};
-var sameAxis = false, autoY = false, bigFrame = false;
-var curStart = 0, curEnd = 100;
-var chart = null, subChart = null;
+var COLORS = {'50':'#e0972f','200':'#d64545'};
+var IDX_KEYS = Object.keys(DATA.indices || {});
+var rawMode = false, autoY = false, bigFrame = false;
+var curStart = 0, curEnd = 100, benchKey = 'hs300', CUR_SPREAD = [];
+var chart = null, idxChart = null, subChart = null;
 
+function fmt(v, suffix) {
+  return (v == null || isNaN(v)) ? '—' : (+v).toFixed(2) + (suffix || '');
+}
 function bounds(startPct, endPct) {
   var n = DATA.dates.length;
-  var a = Math.max(0, Math.floor(startPct / 100 * (n - 1)));
-  var b = Math.min(n - 1, Math.ceil(endPct / 100 * (n - 1)));
-  if (b <= a) { b = Math.min(n - 1, a + 1); }
-  return [a, b];
+  var x = Math.max(0, Math.floor(startPct / 100 * (n - 1)));
+  var y = Math.min(n - 1, Math.ceil(endPct / 100 * (n - 1)));
+  if (y <= x) { y = Math.min(n - 1, x + 1); }
+  return [x, y];
 }
-
-function buildIndexSeries(startPct, endPct) {
-  var r = bounds(startPct, endPct), a = r[0], b = r[1];
-  var out = [];
-  Object.keys(DATA.indices).forEach(function (k) {
-    var arr = DATA.indices[k], vals, axis;
-    if (sameAxis) {
-      var mn = Infinity, mx = -Infinity;
-      for (var i = a; i <= b; i++) { var v = arr[i]; if (v != null) { if (v < mn) mn = v; if (v > mx) mx = v; } }
-      vals = arr.map(function (v) { return (v == null || mx === mn) ? null : +(((v - mn) / (mx - mn)) * 100).toFixed(2); });
-      axis = 0;
-    } else {
-      var base = null;
-      for (var j = a; j <= b; j++) { if (arr[j] != null) { base = arr[j]; break; } }
-      vals = arr.map(function (v) { return (v == null || !base) ? null : +((v / base) * 100).toFixed(2); });
-      axis = 1;
-    }
-    out.push({
-      id: 'idx_' + k,
-      name: DATA.indexNames[k] + (sameAxis ? '（归一 0-100）' : '（基准 100）'),
-      type: 'line', data: vals, yAxisIndex: axis, showSymbol: false, smooth: true,
-      connectNulls: true, lineStyle: {width: 1.9, color: DATA.indexColors[k]},
-      itemStyle: {color: DATA.indexColors[k]}
-    });
+function spreadArray() {
+  var a = DATA.p200Pct || [], b = DATA.indexPct[benchKey] || [];
+  return a.map(function (v, i) {
+    return (v == null || b[i] == null) ? null : +(v - b[i]).toFixed(2);
+  });
+}
+function originalIndexSeries(startPct, endPct) {
+  var r = bounds(startPct, endPct), x = r[0], y = r[1];
+  return IDX_KEYS.map(function (k) {
+    var arr = DATA.indices[k], base = null;
+    for (var j = x; j <= y; j++) { if (arr[j] != null) { base = arr[j]; break; } }
+    return {id:'idx_'+k, name: DATA.indexNames[k]+'（基准 100）', type:'line', yAxisIndex:1,
+      data: arr.map(function(v){ return (v==null||!base)?null:+((v/base)*100).toFixed(2); }),
+      showSymbol:false, smooth:true, connectNulls:true,
+      lineStyle:{width:1.9,color:DATA.indexColors[k]}, itemStyle:{color:DATA.indexColors[k]}};
+  });
+}
+function pctSeries() {
+  var out = [{id:'p200pct', name:'MA200 占比分位', type:'line', yAxisIndex:0, z:6,
+    data: DATA.p200Pct, showSymbol:false, smooth:true, connectNulls:true,
+    lineStyle:{width:2.8,color:'#d64545'}, itemStyle:{color:'#d64545'}}];
+  IDX_KEYS.forEach(function(k){
+    out.push({id:'idx_'+k, name: DATA.indexNames[k]+' 分位', type:'line', yAxisIndex:0, z:5,
+      data: DATA.indexPct[k]||[], showSymbol:false, smooth:true, connectNulls:true,
+      lineStyle:{width:1.7,color:DATA.indexColors[k]}, itemStyle:{color:DATA.indexColors[k]}});
   });
   return out;
 }
-
-function refreshIndices(startPct, endPct) {
-  curStart = startPct; curEnd = endPct;
-  if (chart) chart.setOption({series: buildIndexSeries(startPct, endPct)});
+function spreadSeries() {
+  return [
+    {name:'Spread 背景', type:'bar', yAxisIndex:1, z:1, data:CUR_SPREAD, barWidth:'100%', silent:true,
+     itemStyle:{color:function(p){
+       if (p.value == null) return 'rgba(0,0,0,0)';
+       return p.value >= 0 ? 'rgba(232,69,60,0.20)' : 'rgba(31,159,107,0.20)';
+     }}},
+    {name:'Spread', type:'line', yAxisIndex:1, z:2, data:CUR_SPREAD, showSymbol:false,
+     lineStyle:{width:1,color:'rgba(107,118,136,0.55)'}, itemStyle:{color:'#6b7688'},
+     markLine:{silent:true, symbol:'none', label:{show:false},
+       lineStyle:{type:'dashed',width:1,color:'#aab2c0'},
+       data:[{yAxis:DATA.spreadBig},{yAxis:-DATA.spreadBig},{yAxis:0,lineStyle:{color:'#c9ced8',width:1}}]}}
+  ];
+}
+function rawSeries(startPct, endPct) {
+  var s = [{id:'p200raw', name:'MA200 占比', type:'line', yAxisIndex:0, z:6,
+    data: DATA.p200Values, showSymbol:false, smooth:true, connectNulls:true,
+    lineStyle:{width:2.8,color:'#d64545'}, itemStyle:{color:'#d64545'}}];
+  return s.concat(originalIndexSeries(startPct, endPct));
+}
+function idxTooltip(ps) {
+  if (!ps || !ps.length) return '';
+  var i = ps[0].dataIndex, out = ['<b>'+DATA.dates[i]+'</b>'];
+  out.push('MA200 占比：'+fmt(DATA.p200Values[i],'%')+'　分位：'+fmt(DATA.p200Pct[i]));
+  IDX_KEYS.forEach(function(k){
+    out.push(DATA.indexNames[k]+'：'+fmt(DATA.indices[k][i])+'　分位：'+fmt(DATA.indexPct[k][i]));
+  });
+  var sp = CUR_SPREAD[i];
+  if (sp != null) {
+    var col = sp >= 0 ? '#E8453C' : '#1FB37A';
+    var tag = Math.abs(sp) >= DATA.spreadBig ? ' · 大劈叉' : '';
+    out.push('<span style="color:'+col+'">Spread（vs '+DATA.indexNames[benchKey]+'）：'+(sp>0?'+':'')+sp.toFixed(1)+tag+'</span>');
+  }
+  return out.join('<br>');
 }
 
 function mainChart() {
   var el = document.getElementById('main');
-  if (typeof echarts === 'undefined') {
-    el.innerHTML = '<p style="color:#6b7688">图表库未加载（离线），请查看下方数据表。</p>';
-    return;
-  }
+  if (typeof echarts === 'undefined') { el.innerHTML='<p style="color:#6b7688">图表库未加载（离线），请查看下方数据表。</p>'; return; }
   chart = echarts.init(el);
-  var names = {'5':'站上 5 日线','20':'站上 20 日线','50':'站上 50 日线','200':'站上 200 日线（S5TH 同类）'};
-  var series = Object.keys(DATA.series).map(function (k) {
-    return {name: names[k], type:'line', data: DATA.series[k], smooth:true, showSymbol:false,
-      lineStyle:{width: k === '200' ? 2.6 : 1.6, color: COLORS[k]}, itemStyle:{color: COLORS[k]}};
+  var names = {'50':'站上 50 日线','200':'站上 200 日线（S5TH 同类）'};
+  var series = ['50','200'].map(function(k){
+    return {name:names[k],type:'line',data:DATA.series[k],smooth:true,showSymbol:false,
+      lineStyle:{width:k==='200'?2.8:1.8,color:COLORS[k]},itemStyle:{color:COLORS[k]}};
   });
-  series.push({name:'MA200 占比长周期 EMA', type:'line', data: DATA.emaLong, smooth:true,
-    showSymbol:false, lineStyle:{width:1.3, type:'dashed', color:'#8a93a3'}, itemStyle:{color:'#8a93a3'}});
-  series = series.concat(buildIndexSeries(0, 100));
+  series.push({name:'MA200 占比长周期 EMA',type:'line',data:DATA.emaLong,smooth:true,
+    showSymbol:false,lineStyle:{width:1.3,type:'dashed',color:'#8a93a3'},itemStyle:{color:'#8a93a3'}});
   chart.setOption({
-    animation: false,
-    tooltip:{trigger:'axis'},
-    legend:{top:0, textStyle:{color:'#1f2733'}},
-    grid:{left:52, right:58, top:46, bottom:64},
-    xAxis:{type:'category', data: DATA.dates, axisLabel:{color:'#6b7688'}, axisLine:{lineStyle:{color:'#e6e9ef'}}},
+    animation:false, tooltip:{trigger:'axis'}, legend:{top:0,textStyle:{color:'#1f2733'}},
+    grid:{left:52,right:24,top:46,bottom:64},
+    xAxis:{type:'category',data:DATA.dates,axisLabel:{color:'#6b7688'},axisLine:{lineStyle:{color:'#e6e9ef'}}},
+    yAxis:{type:'value',name:'宽度 %',min:0,max:100,axisLabel:{formatter:'{value}%',color:'#6b7688'},splitLine:{lineStyle:{color:'#eef0f4'}}},
+    dataZoom:[
+      {type:'inside',xAxisIndex:0,zoomOnMouseWheel:true,moveOnMouseMove:true,moveOnMouseWheel:false},
+      {type:'slider',xAxisIndex:0,bottom:12,height:20,borderColor:'#e6e9ef',fillerColor:'rgba(47,111,208,0.12)'}
+    ],
+    series:series
+  });
+  chart.on('dataZoom', function(p){
+    var d = p.batch ? p.batch[0] : p;
+    if (d && d.start != null) { curStart=d.start; curEnd=d.end; }
+    if (rawMode && idxChart) refreshIdx();
+  });
+}
+
+function idxChartInit() {
+  var el = document.getElementById('idx');
+  if (typeof echarts === 'undefined') { el.innerHTML='<p style="color:#6b7688">图表库未加载（离线）。</p>'; return; }
+  idxChart = echarts.init(el);
+  CUR_SPREAD = spreadArray();
+  idxChart.setOption({
+    animation:false, tooltip:{trigger:'axis',formatter:idxTooltip},
+    legend:{top:0,textStyle:{color:'#1f2733'}},
+    grid:{left:52,right:58,top:44,bottom:56},
+    xAxis:{type:'category',data:DATA.dates,axisLabel:{color:'#6b7688'},axisLine:{lineStyle:{color:'#e6e9ef'}}},
     yAxis:[
-      {type:'value', name:'宽度 %', min:0, max:100, axisLabel:{formatter:'{value}%',color:'#6b7688'}, splitLine:{lineStyle:{color:'#eef0f4'}}},
-      {type:'value', name:'指数', min:'dataMin', max:'dataMax', axisLabel:{color:'#6b7688'}, splitLine:{show:false}}
+      {type:'value',name:'分位 0-100',min:0,max:100,axisLabel:{color:'#6b7688'},splitLine:{lineStyle:{color:'#eef0f4'}}},
+      {type:'value',name:'Spread',min:-100,max:100,position:'right',axisLabel:{color:'#9aa3b2'},splitLine:{show:false}}
     ],
     dataZoom:[
-      {type:'inside', xAxisIndex:0, zoomOnMouseWheel:true, moveOnMouseMove:true, moveOnMouseWheel:false},
-      {type:'slider', xAxisIndex:0, bottom:12, height:20, borderColor:'#e6e9ef', fillerColor:'rgba(47,111,208,0.12)'}
+      {type:'inside',xAxisIndex:0,zoomOnMouseWheel:true,moveOnMouseMove:true,moveOnMouseWheel:false},
+      {type:'slider',xAxisIndex:0,bottom:10,height:18,borderColor:'#e6e9ef',fillerColor:'rgba(47,111,208,0.12)'}
     ],
-    series: series
-  });
-  chart.on('dataZoom', function (p) {
-    var b = p.batch ? p.batch[0] : p;
-    if (b && b.start != null) refreshIndices(b.start, b.end);
+    series: pctSeries().concat(spreadSeries())
   });
 }
 
@@ -620,14 +713,27 @@ function subChartInit() {
        lineStyle:{width:1.8, color:'#2f6fd0'}, itemStyle:{color:'#2f6fd0'}}
     ]
   });
-  if (chart) echarts.connect([chart, subChart]);
+}
+
+function refreshIdx() {
+  if (!idxChart) return;
+  if (rawMode) {
+    CUR_SPREAD = [];
+    idxChart.setOption({yAxis:[{},{name:'指数（基准 100）',min:'dataMin',max:'dataMax'}]});
+    idxChart.setOption({series: rawSeries(curStart, curEnd)}, {replaceMerge:['series']});
+  } else {
+    CUR_SPREAD = spreadArray();
+    idxChart.setOption({yAxis:[{},{name:'Spread',min:-100,max:100}]});
+    idxChart.setOption({series: pctSeries().concat(spreadSeries())}, {replaceMerge:['series']});
+  }
 }
 
 function setRange(days) {
   var n = DATA.dates.length;
   var pct = Math.max(0, (n - days) / (n - 1) * 100);
   if (chart) chart.dispatchAction({type:'dataZoom', start:pct, end:100});
-  refreshIndices(pct, 100);
+  curStart = pct; curEnd = 100;
+  if (rawMode) refreshIdx();
   document.querySelectorAll('.ctl button[data-days]').forEach(function (b) { b.classList.remove('on'); });
   var btn = document.querySelector('.ctl button[data-days="' + days + '"]');
   if (btn) btn.classList.add('on');
@@ -638,28 +744,44 @@ function wireControls() {
     b.onclick = function () { setRange(+this.getAttribute('data-days')); };
   });
   document.getElementById('axisBtn').onclick = function () {
-    sameAxis = !sameAxis;
-    this.textContent = sameAxis ? '独立竖轴' : '同竖轴对比';
-    this.classList.toggle('on', sameAxis);
-    refreshIndices(curStart, curEnd);
+    rawMode = !rawMode;
+    this.textContent = rawMode ? '显示归一化分位' : '显示原始走势';
+    this.classList.toggle('on', rawMode);
+    refreshIdx();
+  };
+  document.getElementById('benchSel').onchange = function () {
+    benchKey = this.value;
+    document.getElementById('benchName').textContent = DATA.indexNames[benchKey];
+    if (!rawMode) refreshIdx();
   };
   document.getElementById('sizeBtn').onclick = function () {
     bigFrame = !bigFrame;
     document.getElementById('main').style.height = bigFrame ? '680px' : '420px';
+    document.getElementById('idx').style.height = bigFrame ? '500px' : '320px';
     this.textContent = bigFrame ? '还原图框' : '放大图框';
     this.classList.toggle('on', bigFrame);
     if (chart) chart.resize();
+    if (idxChart) idxChart.resize();
   };
   document.getElementById('yBtn').onclick = function () {
     autoY = !autoY;
     this.textContent = autoY ? '纵轴固定 0-100' : '纵轴自适应';
     this.classList.toggle('on', autoY);
-    if (chart) chart.setOption({yAxis:[{min: autoY ? 'dataMin' : 0, max: autoY ? 'dataMax' : 100}, {}]});
+    if (chart) chart.setOption({yAxis:{min: autoY ? 'dataMin' : 0, max: autoY ? 'dataMax' : 100}});
   };
-  window.addEventListener('resize', function () { if (chart) chart.resize(); if (subChart) subChart.resize(); });
+  window.addEventListener('resize', function () {
+    if (chart) chart.resize();
+    if (idxChart) idxChart.resize();
+    if (subChart) subChart.resize();
+  });
 }
 
-mainChart(); subChartInit(); wireControls();
+mainChart(); idxChartInit(); subChartInit();
+if (typeof echarts !== 'undefined') {
+  var g = [chart, idxChart, subChart].filter(Boolean);
+  if (g.length > 1) echarts.connect(g);
+}
+wireControls();
 </script>
 </body></html>"""
 
@@ -676,6 +798,11 @@ def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
         "emaLong": [float(r.get("ema_long_pct200") or 0) for r in rows],
         "mc": [float(r.get("mcclellan") or 0) for r in rows],
         "indices": res.get("indices", {}),
+        "p200Pct": res.get("p200_pct", []),
+        "indexPct": res.get("index_pct", {}),
+        "p200Values": res.get("p200_values", []),
+        "pctWindow": PCT_WINDOW,
+        "spreadBig": SPREAD_BIG,
         "indexNames": res.get("index_names", {}),
         "indexColors": res.get("index_colors", {}),
         "pool": pool,
@@ -717,8 +844,26 @@ def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
                      f'· <b>{pool["count"]:,}</b> 只。新股上市、退市摘牌由每日清单自动纳入 / 剔除；'
                      f'上市满 {MIN_BARS} 根日线进入 MA5/20/50 宽度，满 200 根进入 MA200 宽度。</div>')
 
+    vals = [float(v) for v in res.get("p200_values", []) if v is not None]
+    if vals:
+        cur = vals[-1]
+        rank = 100.0 * sum(1 for v in vals if v <= cur) / len(vals)
+        lo, hi = min(vals), max(vals)
+        med = sorted(vals)[len(vals) // 2]
+        pct_band = (
+            '<div class="pctband"><div class="pbtitle">当前站上 200 日线占比 · 近 5 年百分位</div>'
+            '<div class="pbrow"><div class="pbbig">' + f'{rank:.1f}' +
+            '<span>%</span></div><div class="pbdesc">当前值 <b>' + f'{cur:.2f}%' +
+            '</b>，高于近 ' + f'{len(vals)}' + ' 个交易日中 <b>' + f'{rank:.1f}%' +
+            '</b> 的读数<br><span>5 年区间 ' + f'{lo:.2f}% ~ {hi:.2f}%' +
+            ' · 中位 ' + f'{med:.2f}%' + '</span></div></div>'
+            '<div class="pbbar"><i style="width:' + f'{rank:.1f}%' + '"></i></div></div>')
+    else:
+        pct_band = ''
+
     html = (HTML_TEMPLATE
             .replace("__CARDS__", cards)
+            .replace("__PCTBAND__", pct_band)
             .replace("__POOL__", pool_html)
             .replace("__AUX__", aux_html)
             .replace("__TRS__", trs)
@@ -727,6 +872,8 @@ def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
             .replace("__NVALID__", f'{res["n_valid"]:,}')
             .replace("__NDAYS__", str(res["used_days"]))
             .replace("__MINBARS__", str(MIN_BARS))
+            .replace("__PCTWINDOW__", str(PCT_WINDOW))
+            .replace("__SPREADBIG__", str(SPREAD_BIG))
             .replace("__MAXROWS__", str(MAX_CSV_ROWS))
             .replace("__MAXMB__", str(int(MAX_DIR_MB)))
             .replace("__GEN__", res["generated_at"])
