@@ -5,7 +5,9 @@ A 股市场宽度（TradingView INDEX:S5TH 同类）—— 云端版，完全脱
 
 主数据源（算均线宽度必须用逐股历史 + 复权，快照类 API 无法替代）:
   AKShare -> 东方财富
-    stock_zh_a_spot_em()                 全市场代码清单（push2，境外偶发 WAF，失败回退 codes.txt）
+    stock_zh_a_spot_em()                 全市场代码清单主源（push2，境外偶发 WAF）
+    stock_info_a_code_name()             代码清单备用源（约 8s，纯在市清单；主源挂了自动切）
+    codes.txt                            仓库内带日期的兜底快照（三级链路最后一环）
     stock_zh_a_hist(adjust="hfq")       逐只后复权日线（push2his；后复权序列连续，无需 gbbq）
     index_zh_a_hist()                   沪深300 / 上证综指 / 创业板指日线，用于同图对比
 
@@ -20,7 +22,8 @@ A 股市场宽度（TradingView INDEX:S5TH 同类）—— 云端版，完全脱
   - 不落盘逐股原始行情，只留聚合结果（无状态）
   - CSV 按日期合并去重、滚动保留 1300 个交易日；单文件 50 MB 护栏
   - docs/ 超过 500 MB 自动裁剪旧数据；有效样本低于下限拒绝覆盖已有结果
-  - 依赖锁版本 + 上界；codes.txt 兜底；补充源失败不阻塞主流程
+  - 依赖锁版本 + 上界；代码池三级链路 + 日期标记；补充源失败不阻塞主流程
+  - 新上市 / 退市股票由每日在线快照自动纳入或剔除；代码池超过 7 天没刷新就禁止幂等跳过
 
 用法:
     python breadth.py                                   # 全市场，约 10~20 分钟
@@ -62,6 +65,8 @@ SOCKET_TIMEOUT = 12          # akshare 内部 requests 未设超时，境外会�
 MIN_VALID = 1000             # 有效样本下限，低于此值拒绝覆盖
 MAX_DIR_MB = 500
 SINGLE_FILE_MB = 50
+MIN_BARS = 51               # 进入计算所需最少日线（MA50 需 50 根 + 1）；改回 205 = 恢复「上市满 200 日才纳入」旧口径
+POOL_MAX_AGE_DAYS = 7       # codes.txt 超过该自然日数未刷新就禁止幂等跳过（覆盖春节/国庆长假）
 
 CODES_SNAPSHOT = "codes.txt"
 AUX_API = "https://a-stock-api.wj4020410.workers.dev"
@@ -106,7 +111,9 @@ def d2i(d) -> int:
 
 
 # ----------------------------------------------------------------------------
-# 股票池：在线快照优先，仓库内 codes.txt 兜底
+# 股票池：主源在线快照 → 备用源纯在市清单 → 仓库内带日期的 codes.txt
+# 新上市 / 退市股票靠「每次运行重新拉清单」自动纳入或剔除。
+# codes.txt 第一行写 # updated / source / count，read_codes_file 会跳过注释行。
 # ----------------------------------------------------------------------------
 def is_a_stock(code: str) -> bool:
     c = str(code).zfill(6)
@@ -123,28 +130,82 @@ def read_codes_file(path: str) -> list[str]:
                        if ln.strip() and ln.strip()[:1].isdigit() and is_a_stock(ln.strip())})
 
 
-def get_codes(limit: int, codes_file: str | None) -> list[str]:
+def read_codes_meta(path: str) -> dict:
+    """读 codes.txt 头部注释，用于判断代码池是否陈旧。"""
+    meta: dict = {"updated": "", "source": "", "count": 0, "stale_days": None}
+    if not os.path.isfile(path):
+        return meta
+    with open(path, encoding="utf-8") as f:
+        first = f.readline().strip()
+    if first.startswith("#"):
+        for part in first.lstrip("# ").split("|"):
+            k, _, v = part.partition(":")
+            k, v = k.strip(), v.strip()
+            if k == "count" and v.isdigit():
+                meta[k] = int(v)
+            elif k in ("updated", "source"):
+                meta[k] = v
+    if meta["updated"]:
+        try:
+            d = datetime.strptime(meta["updated"], "%Y-%m-%d")
+            meta["stale_days"] = max(0, (datetime.now() - d).days)
+        except ValueError:
+            pass
+    return meta
+
+
+def write_codes_snapshot(codes: list[str], source: str) -> dict:
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    header = f"# updated: {stamp} | source: {source} | count: {len(codes)}\n"
+    atomic_write(CODES_SNAPSHOT, header + "\n".join(codes) + "\n")
+    return {"updated": stamp, "source": source, "count": len(codes), "stale_days": 0}
+
+
+def get_codes(limit: int, codes_file: str | None) -> tuple[list[str], dict]:
     if codes_file:
         codes = read_codes_file(codes_file)
         if not codes:
             sys.exit(f"自定义股票池为空或不存在: {codes_file}")
         print(f"[1/6] 自定义股票池 {len(codes)} 只（{codes_file}）", flush=True)
-        return codes[:limit] if limit else codes
+        meta = {"updated": datetime.now().strftime("%Y-%m-%d"), "source": "custom",
+                "count": len(codes), "stale_days": 0}
+        return (codes[:limit] if limit else codes), meta
 
-    print("[1/6] 拉取全市场 A 股快照（约 60~90 秒）...", flush=True)
+    print("[1/6] 拉取全市场 A 股代码清单（主源 push2，约 60~90 秒）...", flush=True)
+    # 主源：完整快照，含新股 / 退市整理股
     try:
         df = ak.stock_zh_a_spot_em()
         codes = sorted({str(c).zfill(6) for c in df["代码"] if is_a_stock(c)})
         if len(codes) < 3000:
-            raise RuntimeError(f"快照只有 {len(codes)} 只，疑似上游异常")
-        atomic_write(CODES_SNAPSHOT, "\n".join(codes) + "\n")
-        print(f"[1/6] 全市场快照 {len(df)} 行，A 股正股 {len(codes)} 只；已更新 {CODES_SNAPSHOT}", flush=True)
+            raise RuntimeError(f"主源快照只有 {len(codes)} 只，疑似上游异常")
+        meta = write_codes_snapshot(codes, "online")
+        print(f"[1/6] 主源快照 {len(df)} 行 → A 股正股 {len(codes)} 只；已刷新 {CODES_SNAPSHOT}", flush=True)
+        return (codes[:limit] if limit else codes), meta
     except Exception as e:
-        codes = read_codes_file(CODES_SNAPSHOT)
-        print(f"[1/6] 在线快照失败（{type(e).__name__}: {str(e)[:80]}），回退 {CODES_SNAPSHOT}：{len(codes)} 只", flush=True)
-        if not codes:
-            sys.exit("在线快照和 codes.txt 兜底都不可用，本次不覆盖已有结果")
-    return codes[:limit] if limit else codes
+        print(f"  [pool] 主源失败（{type(e).__name__}: {str(e)[:80]}），切备用源 ...", flush=True)
+
+    # 备用源：走不同端点、约 8 秒、纯在市清单（不含退市 / 长期停牌），照样能纳入新股
+    try:
+        df = ak.stock_info_a_code_name()
+        codes = sorted({str(c).zfill(6) for c in df["code"] if is_a_stock(c)})
+        if len(codes) < 5000:
+            raise RuntimeError(f"备用源只有 {len(codes)} 只，疑似上游异常")
+        meta = write_codes_snapshot(codes, "backup")
+        print(f"[1/6] 备用源 stock_info_a_code_name → {len(codes)} 只（纯在市）；已刷新 {CODES_SNAPSHOT}", flush=True)
+        return (codes[:limit] if limit else codes), meta
+    except Exception as e:
+        print(f"  [pool] 备用源失败（{type(e).__name__}: {str(e)[:80]}），回退 {CODES_SNAPSHOT}", flush=True)
+
+    # 兜底：仓库内快照。不刷新日期，让陈旧度可见，并由幂等保护强制持续重试
+    codes = read_codes_file(CODES_SNAPSHOT)
+    if not codes:
+        sys.exit("主源 / 备用源 / codes.txt 三级链路全部不可用，本次不覆盖已有结果")
+    meta = read_codes_meta(CODES_SNAPSHOT)
+    meta["source"] = "fallback:" + (meta["source"] or "unknown")
+    meta["count"] = len(codes)
+    print(f"[1/6] ⚠️ 兜底 {CODES_SNAPSHOT}：{len(codes)} 只，快照日期 "
+          f"{meta['updated'] or '未知'}，已 {meta['stale_days']} 天未刷新", flush=True)
+    return (codes[:limit] if limit else codes), meta
 
 
 # ----------------------------------------------------------------------------
@@ -205,7 +266,7 @@ def fetch_one(code: str, start: str, end: str):
         try:
             df = ak.stock_zh_a_hist(symbol=code, period="daily",
                                     start_date=start, end_date=end, adjust="hfq")
-            if df is None or len(df) < 205 or "收盘" not in df.columns:
+            if df is None or len(df) < MIN_BARS or "收盘" not in df.columns:
                 return code, None
             # 只留两列：5 年窗口下 5900 只全字段会吃掉近 1 GB 内存
             return code, df[["日期", "收盘"]].copy()
@@ -271,7 +332,7 @@ def compute(data: dict, idx_maps: dict) -> dict:
         pos = np.array([ci.get(int(d), -1) for d in ds], dtype=int)
         sel = (pos >= 0) & (cl > 0)
         cl, pos = cl[sel], pos[sel]
-        if len(cl) < 205:
+        if len(cl) < MIN_BARS:
             continue
         valid[row, pos] = True
         for n in MA_WINDOWS:
@@ -410,6 +471,8 @@ h1{font-size:25px;margin:0 0 6px}h2{font-size:17px;margin:30px 0 10px}
 .lab{color:var(--muted);font-size:12px}.val{font-size:28px;font-weight:650;line-height:1.25}.val span{font-size:14px;margin-left:2px}
 .sub{color:var(--muted);font-size:12px}
 .aux{background:#eef4ff;border:1px solid #cfe0f7;color:#284b7a;padding:9px 13px;border-radius:8px;font-size:13px;margin-bottom:10px}
+.pool{background:#eef7f0;border:1px solid #cfe6d6;color:#235c3a;padding:9px 13px;border-radius:8px;font-size:13px;margin-bottom:10px}
+.pool.warn{background:#fff4e8;border-color:#f0cfa4;color:#8a5218}
 .ctl{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:10px 0 14px;font-size:12px;color:var(--muted)}
 .ctl b{color:var(--txt);font-weight:600;margin-left:6px}
 .ctl button{background:#fff;border:1px solid #d8dde6;color:#1f2733;border-radius:6px;padding:5px 11px;cursor:pointer;font-size:12px}
@@ -428,6 +491,7 @@ code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:12px}
 <h1>A 股市场宽度 · S5TH 云端版</h1>
 <p class="lead">等权口径：A 股中「后复权收盘价站上 N 日均线」的占比。近 5 年历史，由 GitHub Actions 每交易日自动计算。</p>
 <div class="cards">__CARDS__</div>
+__POOL__
 __AUX__
 <h2>宽度曲线 与 三大指数对比</h2>
 <div class="ctl">
@@ -445,8 +509,8 @@ __AUX__
 <h2>最近 15 个交易日</h2>
 <table><thead><tr><th>日期</th><th>样本数</th><th>&gt;MA5</th><th>&gt;MA20</th><th>&gt;MA50</th><th>&gt;MA200</th><th>上涨</th><th>下跌</th><th>McClellan</th></tr></thead><tbody>__TRS__</tbody></table>
 <div class="src">
-主数据源：AKShare → 东方财富 <code>stock_zh_a_spot_em</code>（代码清单，失败回退 <code>codes.txt</code>）+ <code>stock_zh_a_hist(adjust="hfq")</code>（逐只后复权日线）+ <code>index_zh_a_hist</code>（沪深300 / 上证综指 / 创业板指）。辅助校验：<code>a-stock-api /api/market-breadth</code> 当日快照（不参与均线计算）。<br>
-数据截止 <b>__LATEST__</b>；成功取数 <b>__NFETCH__</b> 只、计入计算 <b>__NVALID__</b> 只、本次序列 <b>__NDAYS__</b> 个交易日。等权、含北交所/科创创业、ST 未单独剔除、上市不足 200 交易日者剔除、停牌日不计入分母。<br>
+主数据源：AKShare → 东方财富 <code>stock_zh_a_spot_em</code>（代码清单主源）→ <code>stock_info_a_code_name</code>（备用源）→ <code>codes.txt</code>（带日期兜底）+ <code>stock_zh_a_hist(adjust="hfq")</code>（逐只后复权日线）+ <code>index_zh_a_hist</code>（沪深300 / 上证综指 / 创业板指）。辅助校验：<code>a-stock-api /api/market-breadth</code> 当日快照（不参与均线计算）。<br>
+数据截止 <b>__LATEST__</b>；成功取数 <b>__NFETCH__</b> 只、计入计算 <b>__NVALID__</b> 只、本次序列 <b>__NDAYS__</b> 个交易日。等权、含北交所/科创创业、ST 未单独剔除。股票池由每日在线清单自动纳入新股、剔除退市股；上市满 __MINBARS__ 根日线进入 MA5/20/50 宽度，满 200 根进入 MA200 宽度；停牌日不计入分母。<br>
 ⚠️ 5 年历史是用「当前股票池」回算的，早期存在幸存者偏差（当时未上市 / 现已退市的股票不在池内），越往前偏差越大，不可表述为「当时的真实全市场宽度」。<br>
 CSV 滚动保留 __MAXROWS__ 个交易日；docs/ 超过 __MAXMB__ MB 自动裁剪。GitHub Actions 生成于 __GEN__；仅为公开数据统计结果，不构成投资建议。
 </div>
@@ -600,7 +664,7 @@ mainChart(); subChartInit(); wireControls();
 </body></html>"""
 
 
-def write_html(res: dict, aux: dict | None, path: str) -> None:
+def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
     rows = res["rows"][-OUT_DAYS:]
     dates = [r["date"] for r in rows]
     payload = json.dumps({
@@ -614,6 +678,7 @@ def write_html(res: dict, aux: dict | None, path: str) -> None:
         "indices": res.get("indices", {}),
         "indexNames": res.get("index_names", {}),
         "indexColors": res.get("index_colors", {}),
+        "pool": pool,
     }, ensure_ascii=False)
 
     last = rows[-1]
@@ -635,14 +700,33 @@ def write_html(res: dict, aux: dict | None, path: str) -> None:
                           "pct_above_50", "pct_above_200", "advancers", "decliners", "mcclellan"])
         + "</tr>" for r in reversed(rows[-15:]))
 
+    src = pool.get("source", "unknown")
+    age = pool.get("stale_days")
+    if src.startswith("fallback"):
+        pool_html = (f'<div class="pool warn">⚠️ <b>代码池兜底</b>：主源与备用源本次均不可用，'
+                     f'使用仓库内 <code>codes.txt</code>（{pool.get("updated") or "无日期"}，'
+                     f'已 {age if age is not None else "未知"} 天未刷新）。新上市 / 退市股票可能未同步；'
+                     f'系统每次运行都会继续尝试刷新清单。</div>')
+    elif src == "backup":
+        pool_html = (f'<div class="pool warn">⚠️ <b>代码池来自备用源</b>：主源 push2 不可用，'
+                     f'本次用纯在市清单 <b>{pool["count"]:,}</b> 只（不含退市 / 长期停牌股，通常少约 300 只）。'
+                     f'刷新于 {pool.get("updated")}；新股仍会自动纳入。</div>')
+    else:
+        label = {"online": "在线快照 stock_zh_a_spot_em", "custom": "自定义股票池"}.get(src, src)
+        pool_html = (f'<div class="pool">股票池：<b>{label}</b> · 刷新于 <b>{pool.get("updated")}</b> '
+                     f'· <b>{pool["count"]:,}</b> 只。新股上市、退市摘牌由每日清单自动纳入 / 剔除；'
+                     f'上市满 {MIN_BARS} 根日线进入 MA5/20/50 宽度，满 200 根进入 MA200 宽度。</div>')
+
     html = (HTML_TEMPLATE
             .replace("__CARDS__", cards)
+            .replace("__POOL__", pool_html)
             .replace("__AUX__", aux_html)
             .replace("__TRS__", trs)
             .replace("__LATEST__", res["latest"])
             .replace("__NFETCH__", f'{res["n_fetched"]:,}')
             .replace("__NVALID__", f'{res["n_valid"]:,}')
             .replace("__NDAYS__", str(res["used_days"]))
+            .replace("__MINBARS__", str(MIN_BARS))
             .replace("__MAXROWS__", str(MAX_CSV_ROWS))
             .replace("__MAXMB__", str(int(MAX_DIR_MB)))
             .replace("__GEN__", res["generated_at"])
@@ -674,17 +758,25 @@ def main() -> int:
     existing = load_existing_rows(csv_path)
 
     aux = None if a.no_aux else fetch_aux()
+    # 代码池陈旧时禁止幂等跳过：否则一次长期兜底会把新上市股票永久挡在门外
+    before = read_codes_meta(CODES_SNAPSHOT)
+    stale_days = before.get("stale_days")
+    pool_stale = stale_days is None or stale_days > POOL_MAX_AGE_DAYS
+    if pool_stale:
+        desc = f"已 {stale_days} 天未刷新" if stale_days is not None else "没有日期标记"
+        print(f"[0/6] 代码池{desc}（阈值 {POOL_MAX_AGE_DAYS} 天）"
+              f"→ 禁止幂等跳过，强制刷新清单", flush=True)
     if aux:
         print(f"[0/6] 辅助源当日快照：{aux['date']} 上涨 {aux['up']} / 下跌 {aux['down']} "
               f"/ 涨停 {aux['limit_up']}（仅校验）", flush=True)
-        if not a.force and existing and max(existing) == aux["date"]:
-            print(f"已有结果覆盖 {aux['date']}，幂等跳过（--force 可强制）", flush=True)
+        if not a.force and not pool_stale and existing and max(existing) == aux["date"]:
+            print(f"已有结果覆盖 {aux['date']} 且代码池新鲜，幂等跳过（--force 可强制）", flush=True)
             return 0
 
     today = datetime.now()
     start = (today - timedelta(days=LOOKBACK_DAYS)).strftime("%Y%m%d")
     end = today.strftime("%Y%m%d")
-    codes = get_codes(a.limit, a.codes_file or None)
+    codes, pool_meta = get_codes(a.limit, a.codes_file or None)
 
     print(f"[2/6] 拉取 {len(codes)} 只股票的 {LOOKBACK_DAYS} 天后复权日线（并发 {MAX_WORKERS}）...", flush=True)
     data = fetch_all(codes, start, end)
@@ -700,7 +792,7 @@ def main() -> int:
 
     merged = merge_rows(existing, res["rows"], a.max_rows)
     write_csv(merged, csv_path)
-    write_html(res, aux, html_path)
+    write_html(res, aux, pool_meta, html_path)
     notes = housekeeping(a.out, a.max_mb, a.max_rows)
 
     last = res["rows"][-1]
