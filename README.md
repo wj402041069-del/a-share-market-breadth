@@ -181,7 +181,7 @@ codes.txt / 在线快照 → 5923 只逐股后复权日线（并发 10）
 ## 六、GitHub Actions 部署与定时
 
 - 仓库：`wj402041069-del/a-share-market-breadth`（public，Pages 源为 `main` / `docs`）
-- `breadth.yml`：`cron: '30 8 * * 1-5'`（北京 16:30）+ `'0 10 * * 1-5'`（北京 18:00 兜底），`timeout-minutes: 60`
+- `breadth.yml`：`cron: '30 8 * * 1-5'`（北京 16:30）+ `'0 10 * * 1-5'`（北京 18:00 兜底），`timeout-minutes: 90`
 - GitHub 的 cron 一律按 **UTC** 解释，且不保证准时；双 cron 就是为此准备的。第二次若发现辅助源日期 == CSV 最后日期，脚本**幂等跳过**，几乎零成本
 - `maintenance.yml`：每周一北京 11:00 读仓库 `size`，**< 512000 KB 一个字节都不改**；达到阈值才裁剪 CSV 到 365 天 / 删旧快照，正常 commit，**绝不 force push、不重写 main 历史**
 - CI 提交用 `GITHUB_TOKEN`（workflow 已声明 `permissions: contents: write`），**不需要任何 PAT / Secrets**
@@ -225,7 +225,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 5. **交易日历用全市场个股日期并集（阈值 30%）**，严禁只依赖指数文件。本地版用上证指数日历时曾误剔 920 只股票。
 6. **红涨绿跌**：上涨 `#d64545`、下跌 `#1f9d6b`。严禁反色。
 7. **依赖锁死 `akshare==1.20.21 / pandas<3 / numpy<3`**。pandas 3.x 移除 `resample('M')` 等 API，会打断 akshare 内部逻辑；升级前必须本地全量验证。
-8. **境外 runner 四件套不能删**：`socket.setdefaulttimeout(12)`、并发 10、重试 2、`timeout-minutes: 60`。akshare 内部 `requests` 未设超时，境外遇连接问题会挂死；首次全量实测 30 分钟未结束。
+8. **境外 runner 四件套不能删**：`socket.setdefaulttimeout(12)`、并发 10、重试 2、`timeout-minutes: 90`。akshare 内部 `requests` 未设超时，境外遇连接问题会挂死；实测 v2 全量重算 19.9 分钟成功、幂等跳过 0.4 分钟，v3 改 5 年窗口后取数更重，故上限留到 90 分钟。
 9. **5 年历史是「当前股票池回算」**，有幸存者偏差。严禁在页面 / 文档里表述为「当时的真实全市场宽度」。
 10. **HTML 用唯一占位符 `__XXX__` 整段替换，不用 f-string 拼整页 JS**。一处括号转义错整页图表全废；生成后必须抽出 `<script>` 跑 `node --check`。
 11. **仓库内绝不写任何 PAT / Token**，CI 用 `GITHUB_TOKEN`；提交前 `grep -R "ghp_"` 扫一遍。
@@ -277,7 +277,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 | `breadth.py` | **单一主程序**：取数、复权、日历、矩阵计算、CSV/HTML 生成、运行时护栏、全部常量 | 改常量会直接改变口径；改 `compute` 的分母逻辑会静默污染 5 年曲线 |
 | `housekeeping.py` | 纯标准库体积裁剪，供 `maintenance.yml` 调用 | 不依赖 akshare，别顺手 import 进来 |
 | `codes.txt` | 5923 只代码快照，**随仓库提交的数据资产** | 删了 / 写坏会让一次 WAF 限流放大成长期空洞 |
-| `.github/workflows/breadth.yml` | 双 cron、取数、提交 | 改 cron 记得按 UTC 换算；`timeout-minutes` 60 不能减 |
+| `.github/workflows/breadth.yml` | 双 cron、取数、提交 | 改 cron 记得按 UTC 换算；`timeout-minutes` 90 不能减 |
 | `.github/workflows/maintenance.yml` | 每周体积体检 | 阈值 512000 KB、护栏、不 force push 是硬约束 |
 | `requirements.txt` | `akshare==1.20.21 / pandas<3 / numpy<3` | 放开 `pandas<3` 会在某次升级后静默打断 akshare |
 | `docs/index.html` | 生成物，ECharts 看板 | 别手改，下次运行会覆盖；要改去改 `HTML_TEMPLATE` |
@@ -304,7 +304,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 1. **空数组 ≠ 没数据**：Worker 曾把上游失败吞成 `200 + {"data":[]}` 并缓存；本项目对应防线是 `MIN_VALID` / 取数下限 / 拒绝覆盖。任何新接口都要照这个模式写。
 2. **分母**：停牌日不计入、每档均线独立分母、上市不足 200 日剔除。改错不会报错，只会让曲线悄悄偏低。
 3. **复权**：只有 `hfq` 序列是连续的；不要用不复权价，也不要混用两套复权口径。
-4. **境外超时**：`socket.setdefaulttimeout(12)` 是全局的，删掉后 akshare 内部 `requests` 可能无限挂起，CI 会一直跑到 60 分钟超时。
+4. **境外超时**：`socket.setdefaulttimeout(12)` 是全局的，删掉后 akshare 内部 `requests` 可能无限挂起，CI 会一直跑到 90 分钟超时。
 5. **5 年回算**：`LOOKBACK_DAYS` 必须 ≥ 200 日均线预热 + 1300 输出日。减小它会让曲线左端出现假值。
 6. **HTML 占位符**：模板用 `__XXX__` 唯一占位符一次性替换；改回 f-string 拼整页 JS 会因为大括号转义整页失效，且 `node --check` 能提前发现。
 
