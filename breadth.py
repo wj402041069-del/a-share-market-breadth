@@ -1147,6 +1147,254 @@ def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
 
 
 # ----------------------------------------------------------------------------
+# 给 AI 的文本摘要（llms.txt）
+#   —— 与 index.html / breadth.csv 同源，每次运行自动重生成。
+#   —— 静态手写会随交易日过期、静默漂移，因此严禁手改本文件。
+# ----------------------------------------------------------------------------
+LLMS_BASE = "https://wj402041069-del.github.io/a-share-market-breadth/"
+LLMS_REPO = "https://github.com/wj402041069-del/a-share-market-breadth"
+
+
+def _rank_stats(values) -> dict | None:
+    """当前值在给定序列中的 percentile rank（0-100）及区间 / 中位。"""
+    xs = [float(v) for v in (values or []) if v is not None]
+    if not xs:
+        return None
+    cur = xs[-1]
+    return {"rank": 100.0 * sum(1 for v in xs if v <= cur) / len(xs),
+            "cur": cur, "lo": min(xs), "hi": max(xs),
+            "med": sorted(xs)[len(xs) // 2], "n": len(xs)}
+
+
+def _last_num(values):
+    xs = [float(v) for v in (values or []) if v is not None]
+    return xs[-1] if xs else None
+
+
+def _fmt(v, digits: int = 2, suffix: str = "") -> str:
+    if v is None or v == "":
+        return "N/A"
+    try:
+        return f"{float(v):.{digits}f}{suffix}"
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def write_llms(res: dict, path: str) -> None:
+    rows = (res.get("rows") or [])[-OUT_DAYS:]
+    last = rows[-1] if rows else {}
+    latest = res.get("latest") or str(last.get("date", ""))
+    gen = res.get("generated_at") or ""
+    names = res.get("index_names") or {k: v[1] for k, v in INDEXES.items()}
+    indices = res.get("indices") or {}
+    p200_5y, p200_250 = res.get("p200_pct_5y") or [], res.get("p200_pct") or []
+    ipct_5y, ipct_250 = res.get("index_pct_5y") or {}, res.get("index_pct") or {}
+    b = _rank_stats(res.get("p200_values"))
+    idx_ranks = {k: _rank_stats(v) for k, v in indices.items()}
+    p5, p250 = _last_num(p200_5y), _last_num(p200_250)
+
+    L: list[str] = []
+    A = L.append
+    A("# A 股市场宽度监测系统 · 给 AI 的文本摘要（llms.txt）")
+    A("")
+    A(f"> 生成时间：{gen}（北京时间）　最新数据日：{latest}")
+    A(f"> 在线看板：{LLMS_BASE}")
+    A(f"> 机器可读全量数据（CSV，{len(rows)} 个交易日 × {len(CSV_COLS)} 列）：{LLMS_BASE}breadth.csv")
+    A(f"> 本文件：{LLMS_BASE}llms.txt")
+    A(f"> 源码 / 维护手册（README）：{LLMS_REPO}")
+    A("")
+    A("> 本文件由 `breadth.py` 的 `write_llms()` 每次运行自动生成，与看板、CSV 同源同日；")
+    A("> **不要手改，也不要缓存**。每次引用前重新取，并以文件内的「最新数据日」为准。")
+    A("")
+    A("## 这是什么")
+    A("")
+    A("一个跟踪 **A 股全市场「收盘价站上 N 日均线的股票占比」** 的看板，属 TradingView "
+      "`INDEX:S5TH` 同类指标（S5TH = 标普 500 成分股站上 200 日均线的百分比）。")
+    A(f"本项目用**等权**口径（一只股票一票，不看市值），覆盖沪深京 A 股正股，含北交所 / 科创创业，"
+      f"输出 {len(MA_WINDOWS)} 档均线（MA5 / MA20 / MA50 / MA200）的占比，"
+      f"叠加沪深 300 / 上证综指 / 创业板指做归一化背离对比。")
+    A(f"每交易日北京时间 16:30 / 18:00 由 GitHub Actions 自动**全量回算**最近 "
+      f"{MAX_CSV_ROWS} 个交易日（约 5 年），数据源为 AKShare → 东方财富后复权日线；"
+      f"页面与 CSV 提交回仓库，由 GitHub Pages 静态发布。")
+    A("")
+    A("## 如果你是接下这段文字的大模型")
+    A("")
+    A("1. **先看「最新数据日」**，确认数据时点。它是最后一个交易日的日期，不是页面生成时间，"
+      "也不是今天。不要假设数据是当日实时行情。")
+    A("2. **表里的数值就是准的，不要自己重算**，也不要凭记忆补任何数字；"
+      "需要全量历史请直接取上面 CSV 链接。")
+    A("3. **两个「百分位」不是同一个东西，别混用**：头部与下表「4 个百分位」是 "
+      "**近 5 年 percentile rank**（历史读数中低于当前值的比例，0-100）；"
+      "三张背离子图里的曲线是 **rolling min-max 归一化分位**（当日及之前窗口内映射到 0-100）。"
+      "两者数值可能差很远，都正常。")
+    A(f"4. **Spread 的刻度是 −100 ~ +100**：Spread = MA200 占比归一化分位 − 该指数归一化分位。"
+      f"**abs(Spread) ≥ {SPREAD_BIG} 才是大劈叉**；正值（红色）= 宽度领先，负值（绿色）= 指数领先。"
+      "**A 股红涨绿跌，不要反色**，也不要把 40~60 当成「正常区间」——那已是宽度大幅领先的极端值。")
+    A("5. **4 个百分位各自基于不同序列，彼此不可直接相减**；要判断「宽度 vs 指数」背离，"
+      "只能用同一张背离子图里的 Spread。")
+    A("6. 结论必须同时引用 **宽度 + 指数 + 背离方向** 三类证据；单一证据一律标注「证据不足」，"
+      "不要下买卖结论。")
+    A("7. 输出建议：① 150 字以内的大盘定性；② 「支持 / 反对」两栏证据；③ 一句话可执行提示；"
+      "④ 明确写出「不构成投资建议」。")
+    A("")
+    A("## 怎么用这份数据")
+    A("")
+    A("- **4 个百分位（近 5 年 percentile rank，0-100）**：MA200 占比 + 上证综指 / 沪深300 / 创业板指。"
+      "数值越低 = 越接近 5 年低位（越便宜 / 超卖）；越高 = 越接近 5 年高位（越贵 / 过热）。")
+    A(f"- **出手规则**：当某张背离子图 **abs(Spread) < {SPREAD_BIG}（宽度与指数收敛、无大劈叉）** "
+      "且 **对应指数百分位偏低（<30%，最好 <20%）** 时，可**分批**考虑入手；"
+      "若出现「指数领涨、宽度滞后」的绿色大劈叉，是分化反弹，勿追。")
+    A("- **低位 ≠ 立刻反转**：宜分批，并以「宽度回升 / Spread 收敛」作右侧确认。")
+    A("- 页面「结果判断栏」已按四百分位组合给出 红/橙/绿/中性 综合结论，可直接引用。")
+    A("")
+    A("## 数据滞后提示")
+    A("")
+    A(f"- 本文件**最新数据日为 {latest}**，生成时间 {gen}（北京时间）。"
+      "这是最近一个已收盘交易日的统计，**不是实时行情**。")
+    A("- 若你的当前日期晚于该数据日 1 个交易日以上，说明自动刷新可能失败，或正处于周末 / 法定节假日休市；"
+      "此时必须明确写出「数据截至 YYYY-MM-DD」，**不要输出「今日」结论**。")
+    A("- 每交易日北京时间 16:30 主算、18:00 兜底；另有每周三 / 周六 09:30 的"
+      "「最后数据日 vs 应有交易日」死信检查，数据过期会让 GitHub Actions 失败并通知维护者。"
+      "页面顶部也会显示红色横幅。")
+    A("")
+    A("## 当日读数")
+    A("")
+    A(f"所有读数均为同一交易日 **{latest}**（本看板所有序列同日更新，不存在多源错位）。")
+    A("")
+    A("### 市场宽度（等权，单位 %）")
+    A("")
+    A("| 指标 | 当前读数 | 命中 / 分母 | 怎么读 |")
+    A("|---|---|---|---|")
+    read_hint = {5: "短期情绪，噪声大，主图已移除", 20: "月度参与广度",
+                 50: "中长期趋势", 200: "S5TH 同类核心指标，长期牛熊结构"}
+    for n in MA_WINDOWS:
+        A(f"| 站上 MA{n} 日均线占比 | {_fmt(last.get(f'pct_above_{n}'), 2, '%')} | "
+          f"{last.get(f'above_{n}', 'N/A')} / {last.get(f'n_ma{n}', 'N/A')} 只 | {read_hint.get(n, '')} |")
+    A("")
+    A("### 4 个百分位（近 5 年 percentile rank，0-100）")
+    A("")
+    A("| 序列 | 百分位 | 当前值 | 5 年区间 | 中位 |")
+    A("|---|---|---|---|---|")
+    if b:
+        A(f"| MA200 占比 | {_fmt(b['rank'], 1, '%')} | {_fmt(b['cur'], 2, '%')} | "
+          f"{_fmt(b['lo'], 2, '%')} ~ {_fmt(b['hi'], 2, '%')} | {_fmt(b['med'], 2, '%')} |")
+    else:
+        A("| MA200 占比 | N/A | N/A | N/A | N/A |")
+    for k in ("sse", "hs300", "cyb"):
+        s = idx_ranks.get(k)
+        nm = names.get(k, k)
+        if s:
+            A(f"| {nm} | {_fmt(s['rank'], 1, '%')} | {_fmt(s['cur'])} 点 | "
+              f"{_fmt(s['lo'])} ~ {_fmt(s['hi'])} 点 | {_fmt(s['med'])} 点 |")
+        elif k in indices:
+            A(f"| {nm} | N/A | N/A | N/A | N/A |")
+    A("")
+    A("### 宽度 vs 指数背离（Spread = MA200 占比分位 − 指数分位，−100 ~ +100）")
+    A("")
+    A("| 指数 | 默认 5 年周期 Spread | 250 日周期 Spread | 判定 |")
+    A("|---|---|---|---|")
+    for k in ("sse", "hs300", "cyb"):
+        if k not in indices:
+            continue
+        nm = names.get(k, k)
+        v5 = _last_num(ipct_5y.get(k))
+        v250 = _last_num(ipct_250.get(k))
+        s5 = p5 - v5 if p5 is not None and v5 is not None else None
+        s250 = p250 - v250 if p250 is not None and v250 is not None else None
+        if s5 is None:
+            verdict = "数据不足"
+        elif abs(s5) >= SPREAD_BIG:
+            verdict = "大劈叉 · " + ("宽度领先（红）" if s5 > 0 else "指数领先（绿）")
+        else:
+            verdict = "收敛（结构健康）"
+        A(f"| {nm} | {_fmt(s5, 2)} | {_fmt(s250, 2)} | {verdict} |")
+    A("")
+    A("### 涨跌家数与动量")
+    A("")
+    A("| 指标 | 数值 | 说明 |")
+    A("|---|---|---|")
+    A(f"| 上涨家数 | {last.get('advancers', 'N/A')} | 当日 |")
+    A(f"| 下跌家数 | {last.get('decliners', 'N/A')} | 当日 |")
+    A(f"| 上涨 − 下跌 | {last.get('ad_diff', 'N/A')} | 净家数差 |")
+    A(f"| McClellan 振荡器 | {_fmt(last.get('mcclellan'), 1)} | EMA19(净家数) − EMA39(净家数)；"
+      "页面已不绘图，仅存 CSV |")
+    A(f"| MA200 占比 EMA5 | {_fmt(last.get('ema5_pct200'), 2, '%')} | 短期平滑 |")
+    A(f"| MA200 占比 长周期 EMA | {_fmt(last.get('ema_long_pct200'), 2, '%')} | 长期平滑 |")
+    A(f"| 有效样本 | {res.get('n_valid', 'N/A')} 只 | 计入计算的股票数 |")
+    A(f"| 成功取数 | {res.get('n_fetched', 'N/A')} 只 | 本次接口取数成功数 |")
+    A("")
+    A(f"### 最近 {min(15, len(rows))} 个交易日")
+    A("")
+    A("| 日期 | MA5 % | MA20 % | MA50 % | MA200 % | 上涨 | 下跌 |")
+    A("|---|---|---|---|---|---|---|")
+    for r in reversed(rows[-15:]):
+        A(f"| {r.get('date', '')} | {_fmt(r.get('pct_above_5'))} | {_fmt(r.get('pct_above_20'))} | "
+          f"{_fmt(r.get('pct_above_50'))} | {_fmt(r.get('pct_above_200'))} | "
+          f"{r.get('advancers', 'N/A')} | {r.get('decliners', 'N/A')} |")
+    A("")
+    A("## 综合研判（页面「结果判断栏」结论，可直接引用）")
+    A("")
+    if b and idx_ranks:
+        label, level, summary, detail = build_verdict(
+            b["rank"], {k: s["rank"] for k, s in idx_ranks.items() if s})
+        A(f"- **标签**：{label}（等级 `{level}`）")
+        A(f"- **一句话摘要**：{summary}")
+        if detail:
+            A(f"- **展开**：{detail}")
+        A("- 该结论由 `build_verdict()` 按四百分位阈值（LOW=20 / HIGH=80）机械生成，"
+          "**不是人工观点，也不是买卖信号**；引用时保留这一限定。")
+    else:
+        A("- 数据不足，本次无法给出综合研判。")
+    A("")
+    A("## 数据口径与已知限制")
+    A("")
+    A(f"- **后复权**：`stock_zh_a_hist(adjust=\"hfq\")`，除权日不会假跌破；严禁用不复权价。")
+    A("- **等权**：一只股票一票，不看市值。指数涨但宽度掉头，通常说明少数权重在撑，属脆弱结构。")
+    A("- **停牌日不计入当日分母**，且每档均线独立分母；把无值算成「未站上」会让曲线系统性偏低。")
+    A(f"- **上市满 {MIN_BARS} 根日线**才进入 MA5/20/50 宽度，满 200 根才进 MA200 分母。")
+    A("- **股票池三级链路**：东财在线快照 → `stock_info_a_code_name` 备用源 → 仓库内 `codes.txt` 兜底；"
+      "每次运行重拉当日清单，新股上市 / 退市摘牌自动同步。")
+    A(f"- **5 年历史是「当前股票池回算」**：每次运行拉 {LOOKBACK_DAYS} 自然日（约 6.5 年）"
+      f"全市场历史、重算最近 {MAX_CSV_ROWS} 个交易日，**不是逐日累积、不会随时间漂移**，"
+      "但存在**幸存者偏差**——不可表述为「当时的真实全市场宽度」。")
+    A(f"- **CSV 滚动保留 {MAX_CSV_ROWS} 行**（按日期合并去重），UTF-8 BOM，Excel 可直接打开；"
+      f"McClellan 在 CSV 第 19 列。")
+    A("- **新鲜度判断**以北京时间为准（18:30 分界、跳周末）；法定节假日 / 临时休市不在判断范围内，"
+      "长假期间可能提示「距数据日 N 天」，请一律以「最新数据日」为准。")
+    A("")
+    A("## 交叉判读（比单指标可靠）")
+    A("")
+    A("- **宽度领先（Spread 正且大劈叉）**：个股普涨先于指数回暖，是底部常见的领先信号；"
+      "配合「宽度已脱离低位 + 指数仍在 5 年低位」更可靠。")
+    A("- **指数领先（Spread 负且大劈叉）**：少数权重撑指数、个股普跌，属分化反弹，勿追。")
+    A(f"- **可考虑入手的组合**：某张子图 abs(Spread) < {SPREAD_BIG}（收敛）"
+      "且对应指数百分位 <30%（最好 <20%），分批 + 右侧确认。")
+    A("- **过热组合**：MA200 占比百分位 >80% 且指数同步高位，赔率下降，注意宽度是否率先见顶。")
+    A("")
+    A("## 名词速查")
+    A("")
+    A("| 名词 | 含义 |")
+    A("|---|---|")
+    A("| 市场宽度 | 全市场中有多少比例的股票站上某条均线；等权口径 |")
+    A("| S5TH | TradingView 上「标普500 成分股站上 200 日均线的百分比」指标 |")
+    A("| 后复权 hfq | 以当前价格为基准向前调整历史价，序列连续、历史值固定 |")
+    A("| percentile rank | 当前值在历史样本中的排名位置；20% 表示历史上仅 20% 的读数更低 |")
+    A("| rolling min-max 分位 | 当日及之前 N 日窗口内把序列映射到 0-100；只用当日及之前数据，无前视偏差 |")
+    A("| Spread（剪刀差） | MA200 占比归一化分位 − 指数归一化分位，范围 −100 ~ +100 |")
+    A(f"| 大劈叉 | abs(Spread) ≥ {SPREAD_BIG}，宽度与指数严重背离 |")
+    A("| EMA | 指数移动平均 |")
+    A("| McClellan 振荡器 | EMA19(上涨−下跌) − EMA39(上涨−下跌)，广度动量 |")
+    A("| 幸存者偏差 | 用当前仍上市的股票池回算早期历史，已退市个股不在样本内 |")
+    A("")
+    A("## 免责声明")
+    A("")
+    A("仅为公开指标的复现与数据观察，用于学习与研究，**不构成任何投资建议**。"
+      "分位基于有限样本，5 年回算存在幸存者偏差；市场有风险，决策请自行判断。")
+    A("")
+    atomic_write(path, "\n".join(L))
+
+
+# ----------------------------------------------------------------------------
 def main() -> int:
     global MAX_WORKERS
     socket.setdefaulttimeout(SOCKET_TIMEOUT)
@@ -1205,6 +1453,7 @@ def main() -> int:
     merged = merge_rows(existing, res["rows"], a.max_rows)
     write_csv(merged, csv_path)
     write_html(res, aux, pool_meta, html_path)
+    write_llms(res, os.path.join(a.out, "llms.txt"))
     notes = housekeeping(a.out, a.max_mb, a.max_rows)
 
     last = res["rows"][-1]

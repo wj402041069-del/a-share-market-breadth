@@ -9,9 +9,12 @@
 | **主地址（看板）** | [**https://wj402041069-del.github.io/a-share-market-breadth/**](https://wj402041069-del.github.io/a-share-market-breadth/) | GitHub Pages 托管，手机浏览器直接打开 |
 | **源码 / 手动刷新** | [**https://github.com/wj402041069-del/a-share-market-breadth**](https://github.com/wj402041069-del/a-share-market-breadth) | Actions → A-share Market Breadth → Run workflow |
 | **看板中心（聚合入口）** | [**https://wj-dashboards.pages.dev/**](https://wj-dashboards.pages.dev/) | 一个页面切四个看板，含本看板 |
+| **给 AI 的文本摘要（推荐发这个）** | [**https://wj402041069-del.github.io/a-share-market-breadth/llms.txt**](https://wj402041069-del.github.io/a-share-market-breadth/llms.txt) | 纯文本，自动跟随数据日更新；问 AI / 丢给大模型时发这个链接，别发网页 |
 | **离线快照** | 仓库 `docs/index.html` | 下载后双击即可看，数据已烤死在 HTML 里，断网也能看 |
 
-> 三个入口是**同一份产物**：流水线跑完把 `docs/` 提交回 `main`，Pages 自动发布。国内偶尔打不开 `github.io` 时，用源码仓库下载 `docs/index.html` 本地打开，内容完全一致。
+> 主地址 / 看板中心 / 离线快照是**同一份产物**：流水线跑完把 `docs/` 提交回 `main`，Pages 自动发布。国内偶尔打不开 `github.io` 时，用源码仓库下载 `docs/index.html` 本地打开，内容完全一致。
+>
+> `llms.txt` 与前三者**同源同日**，由 `breadth.py` 的 `write_llms()` 每次运行自动重生成（不是手写文档）。它是给大模型读的纯文本：把链接直接发给 AI，AI 就能拿到当日读数、口径限制与研判结论，不必去解析 HTML。**严禁手改 `docs/llms.txt`**，改文案请改 `write_llms()`（见第九章第 20 条 / 12.3 第 11 条）。
 
 手机 Safari / Chrome / 微信直接打开主地址，然后：
 
@@ -29,7 +32,7 @@
 每交易日北京 16:30（18:00 兜底）
    GitHub Actions → breadth.py（拉约 6.5 年日线，重算近 5 年宽度 + 三大指数）
         ↓ 生成
-   docs/index.html  +  docs/breadth.csv
+   docs/index.html  +  docs/breadth.csv  +  docs/llms.txt（给 AI 的纯文本摘要）
         ↓ git commit 回 main
    GitHub Pages 自动发布 → https://wj402041069-del.github.io/a-share-market-breadth/
 ```
@@ -189,6 +192,7 @@
                             ↓
         docs/index.html（ECharts，5 年数据烤死在页内）
         docs/breadth.csv（最多 1300 个交易日）
+        docs/llms.txt（给 AI 的文本摘要，同一份 res 生成）
                             ↓ git commit
                       GitHub Pages
 ```
@@ -197,6 +201,7 @@
 |---|---|
 | `docs/index.html` | 唯一看板；4 张卡片 + 头部百分位（MA200 占比 + 3 指数 共 4 个 5 年百分位）+ 用法说明框 + 结果判断栏 + 主图（宽度曲线）+ 3 张归一化背离子图（上证 / 沪深300 / 创业板 各 vs MA200 占比）+ 最近 15 日表（McClellan 不再绘图） |
 | `docs/breadth.csv` | 21 列完整序列，UTF-8 BOM，Excel 可直接打开 |
+| `docs/llms.txt` | **给 AI 的纯文本摘要**（约 10 KB）：生成时间 / 最新数据日、在线看板与 CSV 链接、给大模型的 7 条阅读规则、当日读数（4 档宽度 + 4 个百分位 + 3 张子图 Spread + 涨跌家数 + 最近 15 日）、综合研判原文、数据滞后提示、口径限制、交叉判读、名词速查、免责声明。由 `write_llms()` 用**同一个 `res`** 生成，与 HTML / CSV 同源同日；**严禁手改** |
 | `codes.txt` | 全市场代码快照 + 首行日期标记，随仓库提交，是三级链路的真实兜底数据资产 |
 | `check_freshness.py` | **数据新鲜度死信开关**：以北京时间断言 `docs/breadth.csv` 最后交易日不早于应有交易日；过期 / 缺失 / 解析失败 → 退出码 1。零外部依赖，不依赖数据源是否在线 |
 | `.github/workflows/freshness.yml` | 周三 / 周六 09:30（北京）自动跑上述断言，并支持手动触发；断言失败即 job 失败，GitHub 按通知设置提醒仓库所有者 |
@@ -229,7 +234,7 @@ Spread[i] = MA200 占比分位[i] − 基准指数分位[i]        取值 −100
 ```
 
 - **为什么都必须是滚动窗口**：整段**固定** min-max 会用未来极值、把近端压成水平线，±25 劈叉阈值也失效。两种周期都只用「当日及之前」的数据，且**不随图表缩放窗口漂移**（旧版按当前显示窗口归一化会漂移，已废弃）。注意 1300 日窗口在**最后一个点**上数值等价于整段 min-max，但历史点仍是累计口径，不含未来数据。
-- **两种周期怎么选（v3.5 新增）**：`250 日滚动`（默认）看近一年相对位置，中短期背离灵敏；`5 年周期`（图 2 标题下方按钮切换）看长期历史位置，但近端波动会被压平。实测 2026-11-06：MA200 占比分位 **4.75 → 6.32**，Spread(vs 沪深300) **−1.65 → −36.45**（5 年视角下变成大劈叉），两套分位有 761/1300 个点不同。两套都由 Python 端 `rolling_minmax_pct()` 算好烤进 payload（`p200Pct`/`indexPct` 与 `p200Pct5y`/`indexPct5y`），**前端只切换取哪一套，绝不在浏览器里重算**。切换会同步更新 Spread 背景、曲线、说明文字与悬停窗口标注，并保留图例勾选状态。
+- **两种周期怎么选（v3.5 新增、v3.6 调整默认值）**：`5 年周期`（`PCT_WINDOW_5Y=1300`，**页面默认**，图 2 标题下方按钮高亮）看长期历史位置，但近端波动会被压平；`250 日滚动`（`PCT_WINDOW=250`，可切换）看近一年相对位置，中短期背离灵敏。实测 2026-11-06：MA200 占比分位 **4.75 → 6.32**，Spread(vs 沪深300) **−1.65 → −36.45**（5 年视角下变成大劈叉），两套分位有 761/1300 个点不同。两套都由 Python 端 `rolling_minmax_pct()` 算好烤进 payload（`p200Pct`/`indexPct` 与 `p200Pct5y`/`indexPct5y`），**前端只切换取哪一套，绝不在浏览器里重算**。切换会同步更新 Spread 背景、曲线、说明文字与悬停窗口标注，并保留图例勾选状态。
 - **红绿背景**：`Spread > 0` 红 `#E8453C`（宽度领先）、`Spread < 0` 绿 `#1FB37A`（指数领先），A 股红涨绿跌；20% 透明柱状铺在底层，前景是归一化曲线，右轴另有细 Spread 线。
 - **|Spread| ≥ 25 为大劈叉**，右轴固定 −100 ~ +100 并画 ±25 / 0 三条虚线；悬停显示当日 MA200 占比、该指数原始值与分位、Spread 数值与状态。
 - 归一化是**形状对比，不是收益率**：指数用收盘价、MA200 占比用百分比，各自映射到 0-100 后同竖轴可比。
@@ -355,7 +360,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 
 ## 九、防 Bug 铁律（改动代码前必读）
 
-> **以下 19 条均来自真实踩坑，严禁回退。**
+> **以下 20 条均来自真实踩坑，严禁回退。**
 
 1. **必须用后复权 `adjust="hfq"`**。严禁用不复权收盘价直接算 MA：除权日会假跌破，实测 MA200 占比差约 3 个百分点（24.61% vs 27.57%）。
 2. **`codes.txt` 兜底不能删，且每个在线源都有写回下限**（主源 ≥3000、备用源 ≥5000 只）。push2 对云出口有 WAF 502；把异常小的快照写进兜底文件，等于把一次限流放大成长期数据空洞。**头部 `# updated | source | count` 注释行不能删**，`read_codes_meta()` 靠它判断陈旧、`read_codes_file()` 靠「首字符是数字」跳过它。
@@ -371,13 +376,15 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 12. **绝不 force push、不重写 main 历史**。500 MB 清理只裁剪 `docs/` 数据文件，正常 commit。
 13. **股票池每次运行必须重新拉当日清单**，禁止把 `codes.txt` 当静态成分股表直接复用。新股上市、退市摘牌全靠这一步同步；`codes.txt` 只是三级链路的最后兜底。降级到备用源 / 兜底时必须在结果页打橙色告警条，不许静默。
 14. **幂等跳过前必须先检查代码池陈旧度**。只看辅助源 `date` 会让一次长期兜底把新上市股票永久挡在门外（`get_codes()` 根本没被调用）；`POOL_MAX_AGE_DAYS = 7` 与 `read_codes_meta()` 不能删。**`MIN_BARS` 只改一个常量就能回退口径**，不要在 `fetch_one()` / `compute()` 里各写死一个数字。
-15. **归一化分位默认是滚动 `PCT_WINDOW=250` 日窗口，图 2 可切换滚动 `PCT_WINDOW_5Y=1300` 日窗口，但两者都必须只用「当日及之前」的数据**。严禁整段**固定** min-max（会用未来极值、把近端压平、±25 阈值失效），严禁按当前显示窗口归一化（缩放时口径漂移），严禁在前端重算（两套分位必须由 Python 端 `rolling_minmax_pct()` 一次算好烤进 payload，前端只切换取哪一套）。5 年周期近端会被压平是已知限制，页面必须标注且不得设为默认。Spread 正红 `#E8453C` / 负绿 `#1FB37A` 是 A 股红涨绿跌，不许反色。切换图 2 series 必须用 `replaceMerge:['series']`，普通 `setOption` 会残留旧曲线。
+15. **两套归一化分位都必须只用「当日及之前」的滚动窗口**：`PCT_WINDOW=250`（约 1 年）、`PCT_WINDOW_5Y=1300`（5 年全序列）。**页面默认 5 年（v3.6 起，`pctWin='5y'`、按钮「5 年周期」默认高亮），可切换 250 日**；两套都必须由 Python 端 `rolling_minmax_pct()` 一次算好烤进 payload，前端只切换取哪一套。严禁整段**固定** min-max（会用未来极值、把近端压平、±25 阈值失效），严禁按当前显示窗口归一化（缩放时口径漂移），严禁在前端重算。5 年周期近端会被压平是已知限制，页面必须标注。Spread 正红 `#E8453C` / 负绿 `#1FB37A` 是 A 股红涨绿跌，不许反色。切换 3 张子图 series 必须用 `replaceMerge:['series']`，普通 `setOption` 会残留旧曲线。
 16. **图例显隐状态只能从图表实例读，不许用 `legendselectchanged` 事件缓存**。`dispatchAction` 不触发该事件，`refreshAll()` 若把事件缓存的 `selected` 写回去会覆盖用户勾选。3 张背离子图默认关闭的曲线（`MA200 占比分位`）必须仍可手动勾选；各子图切换视图时 series 改名，要按指数 key 映射两套命名，不能让默认关闭项被重置为显示。
 17. **页面所有时间统一 `BJ_TZ`（UTC+8），不许用裸 `datetime.now()`**。GitHub Actions runner 是 UTC、本地开发机是北京时间，同一个 `generated_at` 曾因此含义不一致，足以让人误判数据新旧。新鲜度判断也一律用北京时间（`markFreshness()` / `bjNow()`），且只作辅助提示；**「数据日期」必须取 CSV 最后交易日 `__LATEST__`**，严禁用页面生成时间冒充数据日期，也别为消除节假日误报去接交易日历接口（会破坏静态页零外部依赖）。
 
 18. **图表容器的 `id`、CSS 选择器、`cfg.el` 三者必须一字不差地一致**。v3.7 曾踩坑：CSS 写成 `#idxSse,#idxHs,#idxCyb`（驼峰），而 JS 的 `cfg.el = 'idx_' + k` 与 HTML 的 `<div id="idx_...">` 实际是 `idx_sse / idx_hs300 / idx_cyb`，选择器永远匹配不到 → 三个背离子图容器高度塌陷为 0、图表不可见，但 `DATA` 正常、无 JS 报错，极难一眼看出。任何改动图表相关代码后，必须用 headless Chrome 确认每个 `#idx_*` 与 `#main` 的 `clientHeight > 0` 且 `echarts.getInstanceByDom` 能取到实例（验收口径见 5.4 / 12.3 第 8 条）。
 
 19. **数据新鲜度死信开关不能删、不能关、不能放宽**：`check_freshness.py` + `.github/workflows/freshness.yml` + 页面 `#staleBanner` 是一整套。判断口径（北京 18:30 分界、跳周末、`latest >= 应有交易日` 即新鲜）**必须与页面 `markFreshness()` 保持一致**——Python（CI 里跑）与 JS（浏览器里跑）是两份实现、故意不共享代码，所以**改一处必须同步另一处**。它零外部依赖、不依赖数据源在线，严禁改成依赖网络 / 交易日历接口；节假日误报属预期。`freshness.yml` 失败 = GitHub 给仓库所有者的「总告警」，**不许为了让检查变绿去改 CSV 日期或放宽阈值**，那是掩盖问题。
+
+20. **`docs/llms.txt` 是自动生成产物，必须和 HTML / CSV 同源同日**：`write_llms(res, ...)` 在 `main()` 里紧跟 `write_html()` 调用，用的是**同一个 `res`**（`rows` / `indices` / `p200_values` / `*_pct_5y` / `generated_at`），不是另跑一次取数。**严禁手写或手改 `docs/llms.txt`**——静态文本会随交易日静默过期，而页面照常更新，AI 拿到的是旧数据却毫无察觉。要改文案改 `write_llms()`，改完用当前 CSV + HTML 内嵌 `DATA` 离线构造 `res` 重生成一次；新增 / 改名 `CSV_COLS` 或 `compute()` 返回键时，必须同步检查 `write_llms()` 里的 `last.get(...)` 是否会出现大面积 `N/A`。`housekeeping()` 只裁剪 `breadth.csv` 与 `snapshots/`，不会删它。**幂等跳过时 `main()` 提前 return、三份产物都不重写是预期行为**（数据日本来就没变），不要为此单独加一次补写。
 
 > 另外两条工程经验：`docs/breadth.csv` 用 `utf-8-sig` 写 BOM，否则 Excel 打开中文表头乱码；本地通达信 `.day` 是 **32 字节小端**结构，早期解析踩过字节序坑（云端版不读 `.day`，但别把两套代码混着改）。
 
@@ -413,6 +420,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 
 **Q15：页面顶部出现红色横幅 / 收到「数据过期」通知怎么办？** 这是**新鲜度死信开关**在工作：`freshness.yml` 每周三 / 周六（北京 09:30）断言 `docs/breadth.csv` 最后交易日，过期即 job 失败并向仓库所有者发通知，同时页面顶部显示红条。排查顺序：① 看 `freshness.yml` 日志里的 `latest / expected / gap`（直接告诉你停在哪天）；② 看 `breadth.yml` 最近几次是失败还是没跑（接口限流 / cron 未触发 / workflow 被 disable）；③ 到 Actions 手动 `Run workflow` 勾 `force=true` 重算，跑完确认 CSV 日期前进、横幅消失。春节 / 国庆长假空窗属正常。**别改 CSV 日期或放宽阈值来「变绿」**——那是掩盖可用性故障。完整步骤见 12.4-E。
 
+**Q16：想让 AI 分析这个看板，发哪个链接？`llms.txt` 会不会过期？** 发 `https://wj402041069-del.github.io/a-share-market-breadth/llms.txt`（手机端地址表里有），别发网页——HTML 里全是 ECharts 脚本，大模型读不出读数。`llms.txt` 每次流水线运行由 `write_llms()` 与 HTML / CSV 同源同日重生成，含当日读数、4 个百分位、3 张子图 Spread、综合研判、口径限制和给大模型的阅读规则；它首行写明「最新数据日」，AI 应先读这一行。若发现日期落后于 CSV 或打开是 404，说明上一次流水线中途失败或产物没推全，按 12.4-G 处理。它由代码生成，**手改会在下次运行被覆盖**，而且手写版本会静默过期。
+
 ## 十一、已知限制与免责声明
 
 1. **幸存者偏差**：5 年历史用当前股票池回算，早期分母偏小，越往前偏差越大。
@@ -440,6 +449,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 | `requirements.txt` | `akshare==1.20.35 / pandas<3 / numpy<3` | 放开 `pandas<3` 会在某次升级后静默打断 akshare |
 | `docs/index.html` | 生成物，ECharts 看板 | 别手改，下次运行会覆盖；要改去改 `HTML_TEMPLATE` |
 | `docs/breadth.csv` | 生成物，最多 1300 行 | 别当临时缓存清理 |
+| `docs/llms.txt` | 生成物，给 AI 的纯文本摘要，由 `write_llms()` 用同一个 `res` 生成 | **严禁手改**；手改会让它与 CSV 数据日脱节、静默过期。改文案改 `breadth.py` 的 `write_llms()`，改完离线重生成一次 |
 
 ### 12.2 两条链路的边界（最容易越界）
 
@@ -458,7 +468,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 - Worker 属于另一个仓库 `wj624/a-stock-api`，它没有逐股历史与复权，**严禁把它接成主数据源**。
 - 只要 `/api/market-breadth` 的 `date` 字段不变，本项目一行都不用改。
 
-### 12.3 十个必踩坑（按踩坑频率排序）
+### 12.3 十一个必踩坑（按踩坑频率排序）
 
 1. **空数组 ≠ 没数据**：Worker 曾把上游失败吞成 `200 + {"data":[]}` 并缓存；本项目对应防线是 `MIN_VALID` / 取数下限 / 拒绝覆盖。任何新接口都要照这个模式写。
 2. **分母**：停牌日不计入、每档均线独立分母、上市不足 `MIN_BARS`(51) 根日线者整只剔除、未满 200 根者不进 MA200 分母。改错不会报错，只会让曲线悄悄偏低。
@@ -467,13 +477,15 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 5. **5 年回算**：`LOOKBACK_DAYS` 必须 ≥ 200 日均线预热 + 1300 输出日。减小它会让曲线左端出现假值。
 6. **HTML 占位符**：模板用 `__XXX__` 唯一占位符一次性替换；改回 f-string 拼整页 JS 会因为大括号转义整页失效，且 `node --check` 能提前发现。
 7. **股票池静默冻结**：最隐蔽的失败不是报错，而是长期用旧 `codes.txt` 还显示绿色。任何改动 `get_codes()` / 幂等判断的代码，都必须保留「每次重拉清单 + 日期标记 + 超 7 天禁止跳过 + 降级橙色告警」，否则新上市股票会永远进不来且无人察觉。
-8. **归一化分位窗口**：`rolling_minmax_pct()` 只接受「当日及之前」的滚动窗口（250 默认 / 1300 可选），不能整段固定 min-max，也不能按图表显示窗口算，更不能把两套分位挪到前端实时算（会出现前视偏差或缩放漂移）。新增周期时两套都要在 Python 端算好写进 payload。3 张背离子图切换 series 必须带 `replaceMerge:['series']`，否则 `setOption` 的 merge 会留下旧曲线，看起来像「切换没生效」或出现幽灵线。改完务必用 headless Chrome 加载 `docs/index.html`，确认 **4 个 `<canvas>`（主图 + 3 张子图）**、两种周期切换后 Spread 末值确实不同、控制台无 JS 异常，且每个 `#idx_*` / `#main` 容器 `clientHeight > 0`（曾因 CSS 选择器与 div id 不匹配导致子图高度塌陷为 0，见第九章第 18 条）。
+8. **归一化分位窗口**：`rolling_minmax_pct()` 只接受「当日及之前」的滚动窗口（**1300 / 5 年为页面默认**，250 可切换），不能整段固定 min-max，也不能按图表显示窗口算，更不能把两套分位挪到前端实时算（会出现前视偏差或缩放漂移）。新增周期时两套都要在 Python 端算好写进 payload。3 张背离子图切换 series 必须带 `replaceMerge:['series']`，否则 `setOption` 的 merge 会留下旧曲线，看起来像「切换没生效」或出现幽灵线。改完务必用 headless Chrome 加载 `docs/index.html`，确认 **4 个 `<canvas>`（主图 + 3 张子图）**、两种周期切换后 Spread 末值确实不同、控制台无 JS 异常，且每个 `#idx_*` / `#main` 容器 `clientHeight > 0`（曾因 CSS 选择器与 div id 不匹配导致子图高度塌陷为 0，见第九章第 18 条）。
 9. **图例状态别用事件缓存**：`legendselectchanged` 对 `dispatchAction` 不触发，靠它存偏好会让「切换视图后手动勾选丢失」；读 `getOption().legend[0].selected` 才可靠。3 张背离子图两种视图的 series 名称不同（` 分位` / `（基准 100）`），重建图例时必须按指数 key 映射两套命名，否则默认关闭的 MA200 占比分位会被重新打开。改完要分别验证「零操作切换」与「手动勾选后切换」两种场景。
 10. **新鲜度死信开关别改坏**：`check_freshness.py`（Python）与页面 `markFreshness()`（JS）是同一套判断口径的两份实现（北京 18:30 分界、跳周末、`latest >= 应有交易日`），**改一处必须同步另一处**，否则会出现「CI 报警但页面显示最新」或反之。脚本故意零外部依赖、不依赖数据源在线——这正是数据源真挂了它还能报警的原因，严禁改成依赖网络。CSV 读取默认 `docs/breadth.csv`（可用 `CSV_PATH` 覆盖）；若哪天 `freshness.yml` 一直绿但数据其实很旧，八成是判断口径被改松或 CSV 路径读错。节假日 / 长假后首日会温和误报一次，属预期，不要接交易日历接口。
 
+11. **`llms.txt` 会静默过期**：它不像页面那样一眼能看出新旧，AI 读到的若是旧文本会照样自信地输出结论。它由 `write_llms(res, ...)` 与 HTML / CSV 共用同一个 `res` 生成，**绝不手写**；排障时先比对其首行「最新数据日」与 `docs/breadth.csv` 最后一行的 `date`，不一致就说明流水线中途失败或有人手改过。改 `CSV_COLS` / `compute()` 返回键 / `INDEXES` key 后，务必检查 `write_llms()` 里 `last.get(...)`、`_rank_stats()` 的键是否还匹配（症状是整表 `N/A`）。幂等跳过时三份产物都不重写属正常，别单独补写造成日期错位。
+
 **可调旋钮表见第八章**，改之前先确认是否同时需要改 `maintenance.yml` 的 `--max-rows`。
 
-### 12.4 六类常见任务的 SOP
+### 12.4 七类常见任务的 SOP
 
 **A. 上游接口变了 / akshare 升级**
 1. 本地跑 `--limit 300 --codes-file codes.txt --out test-out --force --min-valid 100`，确认 `df["日期"]` / `df["收盘"]` 字段名与单位没变。
@@ -499,8 +511,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 **E. 收到「数据过期」通知 / 页面出现红色横幅（新鲜度死信开关触发）**
 1. **先看 `freshness.yml` 最近一次 run 的日志**：脚本会打印 `now(BJ)` / `latest(data)` / `expected >=` / `gap`，直接告诉你数据停在哪天、差几个自然日，不用猜。
 2. **再看 `breadth.yml` 最近的 run**：是「红」（限流 / 上游异常，见 D.1）还是「根本没跑」（cron 未触发 / workflow 被 disable / 仓库长期无活动导致定时任务休眠）。
-3. **手动恢复**：Actions → A-share Market Breadth → Run workflow，勾 `force=true` 强制全量重算；跑完确认 `docs/breadth.csv` 最后日期已前进。
-4. **确认恢复**：等 1~2 分钟让 Pages 重建，`freshness.yml` 再跑一次应变绿、页面红色横幅消失。
+3. **手动恢复**：Actions → A-share Market Breadth → Run workflow，勾 `force=true` 强制全量重算；跑完确认 `docs/breadth.csv` 最后日期已前进，**并顺带确认 `docs/llms.txt` 首行「最新数据日」与之一致**（二者由同一次运行生成）。
+4. **确认恢复**：等 1~2 分钟让 Pages 重建，`freshness.yml` 再跑一次应变绿、页面红色横幅消失；`https://wj402041069-del.github.io/a-share-market-breadth/llms.txt` 应返回 200 且数据日已前进。
 5. **别做**：为了变绿去改 `breadth.csv` 日期、放宽 `check_freshness.py` 阈值或关掉 workflow——那只会把「可用性故障」变成「数据正确性故障」。
 6. 若确认是长假（春节 / 国庆）正常空窗可忽略；连续多个交易日仍红，按 SOP A 查 akshare / 东财接口是否变更。
 
@@ -520,6 +532,12 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 6. **回滚**：`git checkout requirements.txt`（或把 pin 改回旧版本）重新部署即可，`docs/` 数据文件不受影响。
 7. **若升级也救不了**（东财对海外 IP 全面拦截 / akshare 放弃该端点）：换版本无用，得换数据源——实现等价的 `fetch_one()` / `fetch_indices()`（tushare / 新浪 / 腾讯行情均可），但**必须保持 `adjust="hfq"` 后复权、字段语义、`MIN_VALID` 护栏不变**，并过同样的锚点。注意 `codes.txt` 与 `a-stock-api` **只提供代码清单 / 当日快照，不含全量历史日线，不能单独顶替主链路**；实在不行可把 CI 迁到国内 self-hosted runner。
 
+**G. `llms.txt` 打不开 / 内容过期 / 整表 `N/A`**
+1. **404**：说明本次 `breadth.py` 没跑到 `write_llms()` 就退出了（多半是取数下限 / `MIN_VALID` 护栏触发），或有人删了文件。按 D / E 先修主链路，再 `force=true` 重跑；流水线成功会同时产出 `index.html` / `breadth.csv` / `llms.txt` 三份。
+2. **日期落后于 CSV**：只有两种可能——有人手改了产物，或某次提交只推了 CSV 没推 `llms.txt`。**不要手工补日期**，重跑一次全量或按「用当前 CSV + `index.html` 内嵌 `DATA` 离线构造 `res` 调 `write_llms()`」的方式重生成，保证三份同源。
+3. **整表 `N/A`**：`write_llms()` 读的是 `res` 与 `CSV_COLS` 的键名。若刚改过 `CSV_COLS` / `compute()` 返回结构 / `INDEXES` key，逐个核对 `last.get(...)`、`idx_ranks`、`ipct_5y`；修完 `python -m py_compile breadth.py`，再离线生成一次并 `grep -c 'N/A' docs/llms.txt` 应为 0。
+4. **改文案**：只改 `breadth.py` 的 `write_llms()`，改完重新生成 `docs/llms.txt` 一起提交；**严禁直接编辑生成物**。
+
 ### 12.5 可复制给 AI 的提示词
 
 ```text
@@ -529,8 +547,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 【先读什么】
 1. README 第三章「数据源、单位与剔除项」→ 认清主链路（AKShare 东财逐股后复权日线）
    与辅助链路（a-stock-api Worker 当日快照）。
-2. README 第九章「防 Bug 铁律」19 条 → 全部来自真实踩坑，禁止回退。
-3. README 第十二章 → 12.1 文件职责表、12.3 十个坑、12.4 SOP（尤其 E「数据过期排查」、F「akshare 升级/接口挂了」）；改股票池前读 3.5，改图表前读第五章（尤其 5.4 默认显隐）。
+2. README 第九章「防 Bug 铁律」20 条 → 全部来自真实踩坑，禁止回退。
+3. README 第十二章 → 12.1 文件职责表、12.3 十一个坑、12.4 七类 SOP（尤其 E「数据过期排查」、F「akshare 升级/接口挂了」、G「llms.txt 缺失/过期/N/A」）；改股票池前读 3.5，改图表前读第五章（尤其 5.4 默认显隐），改 AI 文本输出前读第九章第 20 条。
 4. 要动 Worker 时读 https://github.com/wj624/a-stock-api 的 README。
 
 【硬约束，违反即算错】
@@ -556,6 +574,10 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
   不许改成依赖网络；收到「数据过期」通知按 12.4-E 排查，不许改 CSV 日期或放宽阈值。
 - 归一化分位两套窗口（250 / 1300）都必须是「当日及之前」滚动、由 Python 端算好烤进 payload；
   严禁整段固定 min-max、按显示窗口重算或放到前端算；**图 2（拆成 3 张独立子图）默认 5 年全序列（1300 日）、可切 250 日**，两套都由 `rolling_minmax_pct()` 在 Python 端算好。
+- docs/llms.txt 与 index.html / breadth.csv 必须由同一次 main() 用同一个 res 生成；
+  严禁手写或手改生成物，改文案只改 write_llms()。它首行「最新数据日」必须等于
+  breadth.csv 最后一行的 date；页面默认归一化周期是 5 年（1300 日）、可切 250 日，
+  llms.txt 的「默认 5 年周期 Spread」必须与之一致。
 - 仓库内绝不写任何 PAT；CI 用 GITHUB_TOKEN。
 - 绝不 force push、不重写 main 历史；500MB 清理只裁剪 docs/ 数据。
 - Worker 是辅助链路，失败静默跳过，绝不能接成主数据源。
@@ -569,6 +591,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 4. 全量跑一次，比对锚点：2026-09-21 MA200 ≈ 27.45%、2026-11-06 ≈ 12.07%。
 5. grep -R "ghp_|github_pat_" 确认无密钥；确认 docs/ 未超过 50MB 单文件护栏。
 6. python check_freshness.py  # 应输出 FRESH 且 exit 0（改过页面新鲜度口径后尤其要跑，确保 Python/JS 两套判断一致）。
+7. 确认 docs/llms.txt 存在：首行「最新数据日」== breadth.csv 最后一行 date，
+   grep -c 'N/A' docs/llms.txt 为 0，且线上 .../llms.txt 返回 200；改过 write_llms() 必须重新生成。
 
 【提交规范】
 commit message 用中文，说明「改了什么 + 为什么」；涉及口径或常量的改动
@@ -592,11 +616,13 @@ commit message 用中文，说明「改了什么 + 为什么」；涉及口径�
 | 2026-11-07 v3.2 | 三图联动 | 主图移除 MA5 / MA20 与指数曲线；**指数独立成图 2**，与 MA200 占比按 etf-lsi 滚动 250 日分位归一化，Spread 正红负绿背景 + ±25 阈值 + 基准切换；三图 `echarts.connect` 联动；页头新增 MA200 占比 5 年百分位条 |
 | 2026-11-07 v3.3 | 默认显隐 | 图 1 `站上 50 日线`、图 2 `上证综指 分位` / `创业板指 分位` **默认关闭**（仍可手动勾选）；图例状态改由 `getOption().legend[0].selected` 读取、去掉 `legendselectchanged` 事件缓存，切换视图时按指数 key 映射两套 series 命名以保留用户勾选。纯前端改动，`breadth.csv` 与 `codes.txt` 未变 |
 | 2026-11-07 v3.4 | 日期徽章 | **标题右侧新增数据日期徽章**：数据交易日 + 星期 + 「最新 / 距数据日 N 天」新鲜度标签 + 页面更新时间；新增 `markFreshness()` 按北京时间判断（18:30 分界、跳周末、节假日只给温和提示）；`generated_at` 统一 `BJ_TZ`(UTC+8) 并去掉秒，修正 runner(UTC) 与本地(北京时间)时间戳含义不一致。纯前端 + 时间格式改动，`breadth.csv` 与 `codes.txt` 未变 |
-| 2026-11-07 v3.5 | 本次 | **图 2 新增「归一化周期」切换**：`250 日滚动`（默认，口径不变）↔ `5 年周期`（`PCT_WINDOW_5Y=1300` 日滚动窗口）。两套分位均由 Python 端 `rolling_minmax_pct()` 算好烤进 payload（`p200Pct5y` / `indexPct5y`），前端只切换取哪一套，重算 Spread、曲线、说明文字与悬停标注，保留图例勾选；手机端按钮组自适应、提示文字隐藏。实测末日分位 4.75→6.32、Spread −1.65→−36.45。`breadth.csv` 与 `codes.txt` 未变，HTML 202828→240128 B |
+| 2026-11-07 v3.5 | 本次 | **图 2 新增「归一化周期」切换**：`250 日滚动`（**当时的**默认，口径不变；v3.6 起默认改为 5 年，见下行）↔ `5 年周期`（`PCT_WINDOW_5Y=1300` 日滚动窗口）。两套分位均由 Python 端 `rolling_minmax_pct()` 算好烤进 payload（`p200Pct5y` / `indexPct5y`），前端只切换取哪一套，重算 Spread、曲线、说明文字与悬停标注，保留图例勾选；手机端按钮组自适应、提示文字隐藏。实测末日分位 4.75→6.32、Spread −1.65→−36.45。`breadth.csv` 与 `codes.txt` 未变，HTML 202828→240128 B |
 | 2026-11-07 v3.6 | 默认调整 | **图 2 默认改为「5 年周期」（1300 日滚动）、默认关闭「MA200 占比分位」**（仅显示沪深300 分位 + Spread 背景）。`var pctWin` 默认 `'5y'`、按钮 `5 年周期` 默认高亮、`pctWinDesc` 初始文案同步；`idxLegendSelected()` 归一化视图下 MA200 占比分位默认 `false`（原始走势视图下仍默认 `true`）。README 5.1 / 5.3 / 5.4 / 第八章旋钮 / 第九章第 15·16 条铁律 / Q2·Q13 同步改写。纯前端 + 文档改动，`breadth.csv` 与 `codes.txt` 未变，HTML 240128→240299 B |
 | 2026-11-07 v3.7 | 拆分+百分位+结论 | 图 2「三大指数」**拆成 3 张独立子图**（上证 / 沪深300 / 创业板 各 vs MA200 占比，四图联动）；MA200 占比百分位条下方新增 **3 张指数 5 年百分位卡片**，共 **4 个百分位**；**移除 McClellan 振荡器图表**（涨跌家数仅留 15 日表，CSV 仍保留该列）；新增「用法说明框」（怎么读 4 个百分位 + 出手规则：|Spread|<25 收敛且指数百分位<30% 时分批入手）与「结果判断栏」（`build_verdict()` 按 MA200 占比百分位 × 3 指数百分位的 8 种组合给出 红/橙/绿/中性 结论）。后续修复 3 张子图 CSS 高度选择器不匹配（`#idxSse` → `#idx_sse` 等）使图表正常显示。纯前端 + 文档，`breadth.csv` 与 `codes.txt` 未变，HTML ≈ 219 KB |
 | 2026-11-07 v3.8 | 新鲜度死信开关 | 新增 `check_freshness.py`（零依赖）以北京时间断言 CSV 最后交易日不早于应有交易日，过期 / 缺失 / 解析失败退出码 1；新增 `.github/workflows/freshness.yml`（周三 / 周六 09:30 北京 + 手动触发，断言失败即 job 失败 → GitHub 通知）；页面顶部新增红色告警横幅 `#staleBanner`（过期 / 无数据时显示），保留原 `freshtag` 小标签。纯前端 + 新增检查脚本 / 工作流，`breadth.csv` 与 `codes.txt` 未变 |
 | 2026-11-07 v3.9 | 依赖升级 | `akshare` **1.20.21 → 1.20.35**（PyPI 最新）。按 12.4-F 验证：小样本 300 只全链路通过 → 全市场 5923 只（成功 5751 / 有效 5740）→ 锚点 2026-09-21 **27.45→27.46**、2026-11-06 **12.06→12.06**，1300 个交易日四档占比最大偏差 **0.09pct**（远低于 0.3pct 阈值），判定口径等价后改 pin。`breadth.csv` 与 `codes.txt` 未变 |
+
+| 2026-11-07 v3.10 | 给 AI 的文本输出 | 新增 `docs/llms.txt`（**自动生成**，约 10 KB）：在 `breadth.py` 里加 `write_llms(res, path)`，`main()` 中紧跟 `write_html()` 调用，与 HTML / CSV 共用同一个 `res`。含 10 个小节：这是什么 / 给大模型的 7 条规则 / 怎么用 / 数据滞后提示 / 当日读数（4 档宽度 + 4 个百分位 + 3 张子图 Spread + 涨跌家数 + 最近 15 日）/ 综合研判 `build_verdict()` 原文 / 口径与已知限制 / 交叉判读 / 名词速查 / 免责声明。手机端地址表新增该链接；第九章新增第 20 条铁律「严禁手改生成物」、12.3 第 11 个坑、12.4-G SOP、FAQ Q16 与 12.5 提示词同步。同时修正铁律 15 与 5.1 / 12.3-8 中「默认 250 日」的过期描述（v3.6 起实际默认 5 年）。`breadth.csv` 与 `codes.txt` 未变，首版 `llms.txt` 与 2026-11-06 数据日对齐、`N/A` 计数为 0 |
 
 **交叉验证锚点**（两套完全不同数据源 / 复权方式）：
 
