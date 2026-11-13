@@ -1,0 +1,35 @@
+name: 数据源可用性探测（海外 runner）
+
+# breadth.py 的 HIST_FALLBACK 开关开启前，必须先在 GitHub Actions 海外 runner 上
+# 确认新浪 / 腾讯的逐股后复权历史可达。本机国内 IP 测通不算数。
+# 本 workflow 只读，不写仓库文件、不碰 docs/，也不触发主计算。
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * 6'   # 北京周六 12:00，每周给云巡检提供一次源健康信号
+
+permissions:
+  contents: read
+
+concurrency:
+  group: probe-sources
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Probe non-EastMoney sources on overseas runner
+        run: python probe_sources.py

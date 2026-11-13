@@ -5,11 +5,20 @@ A 股市场宽度（TradingView INDEX:S5TH 同类）—— 云端版，完全脱
 
 主数据源（算均线宽度必须用逐股历史 + 复权，快照类 API 无法替代）:
   AKShare -> 东方财富
-    stock_zh_a_spot_em()                 全市场代码清单主源（push2，境外偶发 WAF）
-    stock_info_a_code_name()             代码清单备用源（约 8s，纯在市清单；主源挂了自动切）
-    codes.txt                            仓库内带日期的兜底快照（三级链路最后一环）
-    stock_zh_a_hist(adjust="hfq")       逐只后复权日线（push2his；后复权序列连续，无需 gbbq）
-    index_zh_a_hist()                   沪深300 / 上证综指 / 创业板指日线，用于同图对比
+    stock_zh_a_hist(adjust="hfq")       逐只后复权日线主源（push2his；后复权序列连续，无需 gbbq）
+    stock_zh_a_spot_em()                全市场代码清单主源（push2，境外偶发 WAF / 限流）
+    index_zh_a_hist()                   沪深300 / 上证综指 / 创业板指日线主源
+
+多源冗余（v3.12，主源失败才触发；详见 README 第九章第 22 条）:
+  ① 代码清单（始终启用，低风险）
+      stock_info_a_code_name()  → stock_zh_a_spot() → stock_zh_a_spot_tx() → codes.txt
+  ② 指数日线（始终启用，中低风险）
+      stock_zh_index_daily()    → stock_zh_index_daily_tx()
+  ③ 逐股后复权历史（受 HIST_FALLBACK 开关控制，默认关闭！）
+      stock_zh_a_daily(hfq)     → stock_zh_a_hist_tx(hfq)
+      开启前必须先在 GitHub Actions 海外 runner 上跑 probe-sources.yml 验证可达性。
+      每只股票整段历史只用一个源，禁止逐日拼接；混源时末端按共同覆盖率裁剪。
+      ⚠ 替代源通常比东财晚 1 个交易日，且北交所部分新股历史不足会被 MA200 过滤。
 
 辅助数据源（a-stock-api / Cloudflare Worker，云出口友好，仅做轻量补充，绝不当主源）:
     /api/market-breadth   当日涨跌家数 / 涨停 / 连板快照，用于幂等判断 + 结果页校验卡片
@@ -47,6 +56,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
+import pandas as pd
 
 # 页面时间统一显示北京时间：GitHub Actions runner 是 UTC，直接用 datetime.now()
 # 会让「生成于」在本地（北京）与云端（UTC）含义不一致，进而误判数据是否最新。
@@ -75,6 +85,15 @@ POOL_MAX_AGE_DAYS = 7       # codes.txt 超过该自然日数未刷新就禁止�
 PCT_WINDOW = 250            # 默认：etf-lsi 归一化分位的滚动窗口（交易日）
 PCT_WINDOW_5Y = MAX_CSV_ROWS  # 可选：图 2 可切换的 5 年全序列滚动窗口（交易日）
 SPREAD_BIG = 25             # |Spread| 达到该值算「大劈叉」
+
+# --- 多源冗余旋钮（v3.12，改这里之前先读 README 第九章第 22 条）--------------
+# 逐股历史 fallback 默认关闭。代码清单层与指数层的备用源是「主源挂了才切」，
+# 无口径风险，始终启用；但逐股后复权历史换源会改变复权基准 / 最新交易日，
+# 必须先在 GitHub Actions 海外 runner 上跑 probe-sources.yml 确认可达，再置 1。
+HIST_FALLBACK_ENV = os.environ.get("HIST_FALLBACK", "0") == "1"
+FALLBACK_COVER_RATIO = 0.80  # 混源时「末端共同交易日」的最低股票覆盖率
+POOL_MIN_COUNT = 5000        # 代码清单备用源少于此数视为上游异常，继续切下一源
+HIST_MIN_BARS = MIN_BARS     # 备用源进入计算所需最少日线（与主源一致）
 
 CODES_SNAPSHOT = "codes.txt"
 AUX_API = "https://a-stock-api.wj4020410.workers.dev"
@@ -169,6 +188,36 @@ def write_codes_snapshot(codes: list[str], source: str) -> dict:
     return {"updated": stamp, "source": source, "count": len(codes), "stale_days": 0}
 
 
+def _clean_pool(values, min_count: int, label: str) -> list[str]:
+    """把各清单源的代码列统一成 6 位纯数字；新浪 / 腾讯现货源带 sh/sz/bj 前缀。"""
+    out: set[str] = set()
+    for v in values:
+        s = str(v).strip().lower()
+        if s[:2] in ("sh", "sz", "bj"):
+            s = s[2:]
+        s = s.zfill(6)
+        if is_a_stock(s):
+            out.add(s)
+    codes = sorted(out)
+    if len(codes) < min_count:
+        raise RuntimeError(f"{label} 只有 {len(codes)} 只（下限 {min_count}），疑似上游异常")
+    return codes
+
+
+# 代码清单四级链路：东财 push2 → 新浪清单 → 新浪现货 → 腾讯现货 → codes.txt
+# 后三级都不是东财系，专门用来应对 11-12 那种「push2 整体风控」。
+POOL_SOURCES = [
+    ("主源 push2", "online", 3000,
+     lambda: ak.stock_zh_a_spot_em()["代码"]),
+    ("备用源 stock_info_a_code_name", "backup", POOL_MIN_COUNT,
+     lambda: ak.stock_info_a_code_name()["code"]),
+    ("备用源 新浪 stock_zh_a_spot", "backup:sina", POOL_MIN_COUNT,
+     lambda: ak.stock_zh_a_spot()["代码"]),
+    ("备用源 腾讯 stock_zh_a_spot_tx", "backup:tx", POOL_MIN_COUNT,
+     lambda: ak.stock_zh_a_spot_tx()["code"]),
+]
+
+
 def get_codes(limit: int, codes_file: str | None) -> tuple[list[str], dict]:
     if codes_file:
         codes = read_codes_file(codes_file)
@@ -179,35 +228,22 @@ def get_codes(limit: int, codes_file: str | None) -> tuple[list[str], dict]:
                 "count": len(codes), "stale_days": 0}
         return (codes[:limit] if limit else codes), meta
 
-    print("[1/6] 拉取全市场 A 股代码清单（主源 push2，约 60~90 秒）...", flush=True)
-    # 主源：完整快照，含新股 / 退市整理股
-    try:
-        df = ak.stock_zh_a_spot_em()
-        codes = sorted({str(c).zfill(6) for c in df["代码"] if is_a_stock(c)})
-        if len(codes) < 3000:
-            raise RuntimeError(f"主源快照只有 {len(codes)} 只，疑似上游异常")
-        meta = write_codes_snapshot(codes, "online")
-        print(f"[1/6] 主源快照 {len(df)} 行 → A 股正股 {len(codes)} 只；已刷新 {CODES_SNAPSHOT}", flush=True)
+    print(f"[1/6] 拉取全市场 A 股代码清单（{len(POOL_SOURCES)} 级链路，主源 push2）...", flush=True)
+    for label, source, min_count, fn in POOL_SOURCES:
+        try:
+            codes = _clean_pool(fn(), min_count, label)
+        except Exception as e:
+            print(f"  [pool] {label} 失败（{type(e).__name__}: {str(e)[:80]}），切下一源 ...", flush=True)
+            continue
+        meta = write_codes_snapshot(codes, source)
+        print(f"[1/6] {label} → A 股正股 {len(codes)} 只；已刷新 {CODES_SNAPSHOT}", flush=True)
         return (codes[:limit] if limit else codes), meta
-    except Exception as e:
-        print(f"  [pool] 主源失败（{type(e).__name__}: {str(e)[:80]}），切备用源 ...", flush=True)
-
-    # 备用源：走不同端点、约 8 秒、纯在市清单（不含退市 / 长期停牌），照样能纳入新股
-    try:
-        df = ak.stock_info_a_code_name()
-        codes = sorted({str(c).zfill(6) for c in df["code"] if is_a_stock(c)})
-        if len(codes) < 5000:
-            raise RuntimeError(f"备用源只有 {len(codes)} 只，疑似上游异常")
-        meta = write_codes_snapshot(codes, "backup")
-        print(f"[1/6] 备用源 stock_info_a_code_name → {len(codes)} 只（纯在市）；已刷新 {CODES_SNAPSHOT}", flush=True)
-        return (codes[:limit] if limit else codes), meta
-    except Exception as e:
-        print(f"  [pool] 备用源失败（{type(e).__name__}: {str(e)[:80]}），回退 {CODES_SNAPSHOT}", flush=True)
 
     # 兜底：仓库内快照。不刷新日期，让陈旧度可见，并由幂等保护强制持续重试
+    print(f"  [pool] 全部在线清单源失败，回退 {CODES_SNAPSHOT}", flush=True)
     codes = read_codes_file(CODES_SNAPSHOT)
     if not codes:
-        sys.exit("主源 / 备用源 / codes.txt 三级链路全部不可用，本次不覆盖已有结果")
+        sys.exit("清单四级链路（东财/新浪/腾讯/codes.txt）全部不可用，本次不覆盖已有结果")
     meta = read_codes_meta(CODES_SNAPSHOT)
     meta["source"] = "fallback:" + (meta["source"] or "unknown")
     meta["count"] = len(codes)
@@ -234,23 +270,44 @@ def fetch_aux(timeout: int = 12) -> dict | None:
         return None
 
 
+INDEX_FALLBACK_SYMBOLS = {"hs300": "sh000300", "sse": "sh000001", "cyb": "sz399006"}
+
+
+def _index_map(df, date_col: str, close_col: str, min_rows: int = 200) -> dict:
+    if df is None or len(df) < min_rows or date_col not in df.columns or close_col not in df.columns:
+        raise RuntimeError("返回行数过少或字段缺失")
+    m = {d2i(d): float(c) for d, c in zip(df[date_col], df[close_col])
+         if c == c and float(c) > 0}
+    if len(m) < min_rows:
+        raise RuntimeError("有效点位过少")
+    return m
+
+
 def fetch_indices(start: str, end: str) -> dict:
+    """三级链路：东财 index_zh_a_hist → 新浪 stock_zh_index_daily → 腾讯 stock_zh_index_daily_tx。
+    主源成功时行为与旧版一致；只有主源挂了才切非东财源（实测点位一致，见 README 12.4-H）。"""
     out: dict = {}
     for key, (sym, name, _) in INDEXES.items():
-        for attempt in range(2):
+        fsym = INDEX_FALLBACK_SYMBOLS.get(key, "sh" + sym)
+        chain = [
+            ("东财", lambda: _index_map(
+                ak.index_zh_a_hist(symbol=sym, period="daily", start_date=start, end_date=end),
+                "日期", "收盘")),
+            ("新浪", lambda: _index_map(ak.stock_zh_index_daily(symbol=fsym), "date", "close")),
+            ("腾讯", lambda: _index_map(
+                ak.stock_zh_index_daily_tx(symbol=fsym, start_date=start, end_date=end),
+                "date", "close")),
+        ]
+        for label, fn in chain:
             try:
-                df = ak.index_zh_a_hist(symbol=sym, period="daily",
-                                        start_date=start, end_date=end)
-                if df is None or len(df) < 200:
-                    raise RuntimeError("返回行数过少")
-                m = {d2i(d): float(c) for d, c in zip(df["日期"], df["收盘"]) if c == c}
-                out[key] = m
-                print(f"  指数 {name}({sym})：{len(m)} 根日线", flush=True)
+                out[key] = fn()
+                print(f"  指数 {name}({sym})：{len(out[key])} 根日线（{label}）", flush=True)
                 break
             except Exception as e:
-                if attempt:
-                    print(f"  指数 {name} 取数失败（{type(e).__name__}），该曲线留空", flush=True)
-                time.sleep(1)
+                print(f"  指数 {name} {label}源失败（{type(e).__name__}: {str(e)[:60]}），切下一源", flush=True)
+                time.sleep(0.5)
+        else:
+            print(f"  指数 {name} 三级链路全挂，该曲线留空", flush=True)
     return out
 
 
@@ -269,31 +326,117 @@ def align_index(calendar: list[int], mapping: dict | None) -> list | None:
 # ----------------------------------------------------------------------------
 # 逐股历史
 # ----------------------------------------------------------------------------
-def fetch_one(code: str, start: str, end: str):
+def _prefixed(code: str) -> str:
+    """6 位代码 → 新浪 / 腾讯要求的 sh/sz/bj 前缀形式。"""
+    c = str(code).zfill(6)
+    if c[0] in "56":
+        return "sh" + c
+    if c[0] in "0123":
+        return "sz" + c
+    return "bj" + c          # 43/83/87/92 → 北交所（bj920xxx 已验证可用）
+
+
+def _hist_frame(df, date_col: str, close_col: str):
+    """把备用源日线标准化成主源同款 DataFrame[['日期','收盘']]，日期统一 YYYYMMDD。
+    d2i() 同时兼容 '2026-11-11' 与 '20261111'，所以 compute() 无需改动。"""
+    if df is None or len(df) < HIST_MIN_BARS:
+        return None
+    if date_col not in df.columns or close_col not in df.columns:
+        return None
+    ds = df[date_col].astype(str).str.replace("-", "", regex=False).str[:8]
+    cl = pd.to_numeric(df[close_col], errors="coerce")
+    out = pd.DataFrame({"日期": ds.to_numpy(), "收盘": cl.to_numpy()})
+    out = out[(out["收盘"] > 0) & out["日期"].str.fullmatch(r"\d{8}")]
+    out = out.dropna().sort_values("日期").drop_duplicates("日期", keep="last")
+    return out[["日期", "收盘"]].reset_index(drop=True) if len(out) >= HIST_MIN_BARS else None
+
+
+def _fetch_fallback(code: str, start: str, end: str):
+    """整段同源：主源失败后，这只股票的全部历史只用一个备用源，绝不逐日拼接。"""
+    sym = _prefixed(code)
+    sources = (
+        ("sina", lambda: ak.stock_zh_a_daily(symbol=sym, start_date=start,
+                                             end_date=end, adjust="hfq")),
+        ("tx", lambda: ak.stock_zh_a_hist_tx(symbol=sym, start_date=start,
+                                             end_date=end, adjust="hfq")),
+    )
+    for label, fn in sources:
+        for attempt in range(RETRY):
+            try:
+                f = _hist_frame(fn(), "date", "close")
+                if f is not None:
+                    return f, label
+                break                     # 有返回但行数不足，不必重试，直接试下一源
+            except Exception:
+                time.sleep(0.5 * (attempt + 1))
+    return None, ""
+
+
+def fetch_one(code: str, start: str, end: str, use_fallback: bool = False):
+    # 主源：与 v3.11 逐字一致，保证 HIST_FALLBACK 关闭时行为完全等价
     for attempt in range(RETRY):
         try:
             df = ak.stock_zh_a_hist(symbol=code, period="daily",
                                     start_date=start, end_date=end, adjust="hfq")
             if df is None or len(df) < MIN_BARS or "收盘" not in df.columns:
-                return code, None
+                break
             # 只留两列：5 年窗口下 5900 只全字段会吃掉近 1 GB 内存
-            return code, df[["日期", "收盘"]].copy()
+            return code, df[["日期", "收盘"]].copy(), "em"
         except Exception:
             time.sleep(0.5 * (attempt + 1))
-    return code, None
+    if not use_fallback:
+        return code, None, ""
+    f, label = _fetch_fallback(code, start, end)
+    return code, f, label
 
 
-def fetch_all(codes: list[str], start: str, end: str) -> dict:
+def fetch_all(codes: list[str], start: str, end: str,
+              use_fallback: bool = False) -> tuple[dict, dict]:
     out: dict = {}
+    stats: dict = {"em": 0, "sina": 0, "tx": 0, "none": 0}
     with cf.ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        futs = [ex.submit(fetch_one, c, start, end) for c in codes]
+        futs = [ex.submit(fetch_one, c, start, end, use_fallback) for c in codes]
         for i, fu in enumerate(cf.as_completed(futs), 1):
-            code, df = fu.result()
+            code, df, src = fu.result()
             if df is not None:
                 out[code] = df
+                stats[src] = stats.get(src, 0) + 1
+            else:
+                stats["none"] += 1
             if i % 500 == 0 or i == len(codes):
-                print(f"  历史日线 {i}/{len(codes)}，成功 {len(out)}", flush=True)
-    return out
+                extra = (f"（源分布 东财 {stats['em']} / 新浪 {stats['sina']} / 腾讯 {stats['tx']}）"
+                         if use_fallback else "")
+                print(f"  历史日线 {i}/{len(codes)}，成功 {len(out)}{extra}", flush=True)
+    return out, stats
+
+
+def trim_to_common_last(data: dict,
+                        ratio: float = FALLBACK_COVER_RATIO) -> tuple[dict, int | None]:
+    """混源时把末端截到「≥ ratio 的股票都覆盖」的最近交易日。
+
+    替代源通常比东财晚 1 个交易日；若 50% 股票来自东财、50% 来自新浪，
+    compute() 的 30% 日历阈值会让最新一日只算到一半样本 → 曲线末端假跳水。
+    统一裁剪后所有股票在同一天结束，宽度口径才可比。
+    """
+    if not data:
+        return data, None
+    lasts = np.array([d2i(str(df["日期"].iloc[-1])) for df in data.values()], dtype=np.int64)
+    cut = int(lasts.min())
+    for d in sorted({int(x) for x in lasts}, reverse=True):
+        if float((lasts >= d).mean()) >= ratio:
+            cut = d
+            break
+    if int(lasts.max()) == cut:
+        return data, cut                     # 无需裁剪
+    changed = 0
+    for code, df in list(data.items()):
+        mask = df["日期"].map(lambda x: d2i(x) <= cut)
+        if not bool(mask.all()):
+            data[code] = df[mask].reset_index(drop=True)
+            changed += 1
+    print(f"  [mix] 末端共同交易日裁剪至 {cut}（覆盖率 ≥{ratio:.0%}），"
+          f"修剪 {changed} 只股票", flush=True)
+    return data, cut
 
 
 # ----------------------------------------------------------------------------
@@ -1203,6 +1346,19 @@ def write_llms(res: dict, path: str) -> None:
     A(f"> 机器可读全量数据（CSV，{len(rows)} 个交易日 × {len(CSV_COLS)} 列）：{LLMS_BASE}breadth.csv")
     A(f"> 本文件：{LLMS_BASE}llms.txt")
     A(f"> 源码 / 维护手册（README）：{LLMS_REPO}")
+    src_stats = res.get("source_stats") or {}
+    use_fb = bool(res.get("hist_fallback"))
+    cut = res.get("trimmed_to")
+    if use_fb and (src_stats.get("sina", 0) + src_stats.get("tx", 0)) > 0:
+        desc = (f"逐股后复权日线按股票整段同源混用（东财 {src_stats.get('em', 0):,} / "
+                f"新浪 {src_stats.get('sina', 0):,} / 腾讯 {src_stats.get('tx', 0):,} 只）")
+        if cut:
+            desc += f"；末端已按 ≥{FALLBACK_COVER_RATIO:.0%} 共同覆盖率裁剪至 {cut}"
+        desc += "。替代源通常比东财晚 1 个交易日，跨源切换当日读数可能有小幅口径噪声。"
+    else:
+        desc = ("逐股后复权日线来自 AKShare → 东方财富；代码清单 / 指数日线另有非东财备用源"
+                "（主源失败才切）。")
+    A(f"> 数据口径：{desc}")
     A("")
     A("> 本文件由 `breadth.py` 的 `write_llms()` 每次运行自动生成，与看板、CSV 同源同日；")
     A("> **不要手改，也不要缓存**。每次引用前重新取，并以文件内的「最新数据日」为准。")
@@ -1410,8 +1566,12 @@ def main() -> int:
     ap.add_argument("--no-aux", action="store_true")
     ap.add_argument("--no-index", action="store_true", help="跳过三大指数（快速调试用）")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--hist-fallback", action="store_true",
+                    help="逐股历史启用新浪/腾讯备用源（也可设环境变量 HIST_FALLBACK=1；默认关闭）")
     a = ap.parse_args()
     MAX_WORKERS = a.workers
+    use_fb = a.hist_fallback or HIST_FALLBACK_ENV
+    print(f"[cfg] 逐股历史多源 fallback：{'开启' if use_fb else '关闭（默认）'}", flush=True)
 
     os.makedirs(a.out, exist_ok=True)
     csv_path = os.path.join(a.out, "breadth.csv")
@@ -1440,10 +1600,17 @@ def main() -> int:
     codes, pool_meta = get_codes(a.limit, a.codes_file or None)
 
     print(f"[2/6] 拉取 {len(codes)} 只股票的 {LOOKBACK_DAYS} 天后复权日线（并发 {MAX_WORKERS}）...", flush=True)
-    data = fetch_all(codes, start, end)
+    data, src_stats = fetch_all(codes, start, end, use_fb)
     ratio = len(data) / max(1, len(codes))
-    print(f"[2/6] 取数成功 {len(data):,}/{len(codes):,} 只（{ratio:.1%}）", flush=True)
-    # 三道护栏，缺一不可（详见 README 第九章第 3 / 21 条）：
+    extra = (f"｜源分布 东财 {src_stats['em']} / 新浪 {src_stats['sina']} / 腾讯 {src_stats['tx']}"
+             if use_fb else "")
+    print(f"[2/6] 取数成功 {len(data):,}/{len(codes):,} 只（{ratio:.1%}）{extra}", flush=True)
+    # 混源末端裁剪：只在确实启用且真的用到备用源时执行，避免改变默认口径
+    trimmed_to = None
+    if use_fb and (src_stats["sina"] + src_stats["tx"]) > 0:
+        data, trimmed_to = trim_to_common_last(data)
+    # 三道护栏，缺一不可（详见 README 第九章第 3 / 21 / 22 条）：
+    #   len(data) 是「任一源取到整段历史的股票数」，护栏分母无需另改；
     #   ① 绝对下限 200 只：拦「几乎全挂」，小样本调试也走这条
     #   ② 相对成功率 MIN_FETCH_RATIO：仅全市场规模（>=1000 只）启用，避免 --limit 调试被卡
     #   ③ compute() 之后的有效样本下限 MIN_VALID
@@ -1461,6 +1628,10 @@ def main() -> int:
     idx_maps = {} if a.no_index else fetch_indices(start, end)
 
     res = compute(data, idx_maps)
+    # 供 llms.txt / 页面说明数据源口径，三份产物仍然同源同日
+    res["source_stats"] = src_stats
+    res["hist_fallback"] = use_fb
+    res["trimmed_to"] = trimmed_to
     if res["n_valid"] < a.min_valid:
         sys.exit(f"有效样本仅 {res['n_valid']} 只（下限 {a.min_valid}），本次不覆盖已有结果")
 
