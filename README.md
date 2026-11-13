@@ -164,7 +164,7 @@
 
 **② 指数日线层（三级，始终启用）**：`index_zh_a_hist` → `stock_zh_index_daily`（新浪）→ `stock_zh_index_daily_tx`（腾讯）。2026-11-13 东财限流时实测三条曲线全部自动切到新浪（沪深300 6029 / 上证 8762 / 创业板 3994 根日线），新浪与腾讯点位一致（沪深300 收 4043.925 vs 4043.93）。
 
-**③ 逐股后复权历史层（受 `HIST_FALLBACK` 开关控制，默认关闭）**：这才是 11-12 / 11-13 停更的真正瓶颈。旧版这里曾写「逐股历史走 `push2his`，不受这条 WAF 限制，主源挂掉不会拖垮整个计算」——**已被 11-12 事故证伪**：`push2his` 同样会被限流，且当时没有任何兜底。备用源为新浪 `stock_zh_a_daily(hfq)` 与腾讯 `stock_zh_a_hist_tx(hfq)`，实测 30/30 可用、覆盖 1788 根日线（2019-07-01 起，足够 2400 自然日回算），但**最晚只到 11-12，比东财慢 1 个交易日**。完整口径验证与启用流程见 12.4-H / 第九章第 22 条。
+**③ 逐股后复权历史层（受 `HIST_FALLBACK` 开关控制，默认关闭）**：这才是 11-12 / 11-13 停更的真正瓶颈。旧版这里曾写「逐股历史走 `push2his`，不受这条 WAF 限制，主源挂掉不会拖垮整个计算」——**已被 11-12 事故证伪**：`push2his` 同样会被限流，且当时没有任何兜底。备用源为新浪 `stock_zh_a_daily(hfq)` 与腾讯 `stock_zh_a_hist_tx(hfq)`，实测 30/30 可用、覆盖 1788 根日线（2019-07-01 起，足够 2400 自然日回算），但**最晚只到 11-12，比东财慢 1 个交易日**。完整口径验证与启用流程见 12.4-H / 第九章第 22 条。**CI 已于 2026-11-13 在两次海外探测通过后启用该开关（`breadth.yml` env `HIST_FALLBACK=1`）**；代码默认值仍为 0，本地运行不受影响。
 
 ### 3.3 单位、颜色与口径
 
@@ -372,7 +372,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 | `INDEXES` | 3 个指数 | 增改指数只改这个字典 + 前端颜色映射 |
 | `--codes-file` | 空 | 指定后只用该文件（成分股口径 2~3 分钟跑完） |
 | `--no-aux` / `--no-index` / `--force` | 关 | 调试开关 |
-| `HIST_FALLBACK` / `--hist-fallback` | `0` / 关 | **逐股后复权历史备用源总开关，默认关闭**；只有 `probe-sources.yml` 在 GitHub Actions 海外 runner 上验证通过后才能置 `1`（见 12.4-H） |
+| `HIST_FALLBACK` / `--hist-fallback` | `0` / 关 | **逐股后复权历史备用源总开关，代码默认关闭**；只有 `probe-sources.yml` 在 GitHub Actions 海外 runner 上验证通过后才能置 `1`（见 12.4-H）。**CI 当前 = 1**（2026-11-13 两次探测 OK 后写入 `breadth.yml` 的 `env`），本地跑仍是 0 |
 | `FALLBACK_COVER_RATIO` | `0.80` | 混源末端「共同交易日」的最低股票覆盖率；覆盖率不足的更晚日期会被整批裁掉，防止曲线末端只剩半份样本 |
 | `POOL_MIN_COUNT` | `5000` | 代码清单备用源写回 `codes.txt` 的下限（主源仍是 3000） |
 | `HIST_MIN_BARS` | `=MIN_BARS` (`51`) | 备用源日线进入计算的最少根数，与主源保持一致 |
@@ -581,6 +581,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 1. **判断该不该开**：只有当 `breadth.yml` 日志反复出现 `Push2RateLimitError`、且 `[2/6] 取数成功 N/M` 低于 80% 并持续 2 个交易日以上，才有必要开。限流通常几小时到一天自愈，别一红就切源。
 2. **先跑探测**：Actions → 「数据源可用性探测（海外 runner）」→ Run workflow。它只读、不碰 `docs/`，测新浪 / 腾讯的代码清单、指数与 20 只逐股后复权历史。日志末尾必须出现 `OVERSEAS_RUNNER_OK`（至少一个逐股源成功率 ≥80%）；出现 `OVERSEAS_RUNNER_FAIL` → **保持关闭**，改用国内 self-hosted runner 或等限流解除。
 3. **再开开关**：在 `breadth.yml` 的计算步骤加 `env: HIST_FALLBACK: "1"`（或改 `breadth.py` 的 `HIST_FALLBACK_ENV` 默认值）；本地验证用 `python breadth.py --hist-fallback --limit 300 --codes-file codes.txt --out test-out --force --min-valid 100`。
+   > **当前状态（2026-11-13）：CI 已启用。** 依据：`probe-sources.yml` 两次 `workflow_dispatch` 在 GitHub Actions 海外 runner 均为 `OVERSEAS_RUNNER_OK`（run `43360436778` 新浪 95% / 腾讯 100%；run `43361079639` 新浪 100% / 腾讯 100%）。`.github/workflows/breadth.yml` 的 Compute 步骤已写入 `HIST_FALLBACK: "1"`；本地与代码默认值仍是 0。注意海外 runner 上代码清单层的 `stock_info_a_code_name` / 新浪 `stock_zh_a_spot` 曾失败，靠腾讯现货与 `codes.txt` 兜底——这正是四级清单链路的价值。
 4. **验收**：日志应出现 `[cfg] 逐股历史多源 fallback：开启`、`[2/6] ...｜源分布 东财 N / 新浪 N / 腾讯 N`、必要时 `[mix] 末端共同交易日裁剪至 YYYYMMDD`；`docs/llms.txt` 的「数据口径」行写明各源只数与裁剪日。**三道护栏必须仍然生效**，成功率 <80% 照样非 0 退出。
 5. **已知代价**：替代源通常晚 1 个交易日、北交所约 6% 短历史股被 MA200 过滤、跨源切换当日读数有 <0.2% 的个股判定噪声。2026-11-13 用新浪源抽 281 只重算 11-11：MA5 69.40% / MA20 59.43% / MA50 23.49% / **MA200 15.30%**，对照线上东财 67.98 / 57.42 / 26.97 / **15.35%**，四档全在抽样标准误内，口径等价。
 6. **恢复后关掉**：东财限流解除、连续 2 次全量重算成功率 ≥95% 后把 `HIST_FALLBACK` 置回 `0`，回到单一口径。别让混源成为长期默认。
@@ -682,7 +683,7 @@ commit message 用中文，说明「改了什么 + 为什么」；涉及口径�
 
 | 2026-11-13 v3.11 | 部分成功护栏 | 事故驱动：11-12 东财 push2 限流使两次定时任务仅取到 135 / 16 只（被 200 下限拦下），11-13 手动重算虽恢复到约 25~30%（2500/5924 时累计成功 734），但外推仅 1419~1932 只，**会同时越过 200 与 `MIN_VALID=1000` 而「成功」提交一份有偏样本重写的整条 5 年曲线**。新增 `MIN_FETCH_RATIO=0.80` 第二道护栏（代码池 ≥1000 只时，成功取数须 ≥ `int(len(codes)*0.80)` 才允许覆盖；整数阈值避免 80.0% 浮点误拒），日志新增 `[2/6] 取数成功 N/M 只（x%）`；小样本调试不启用相对护栏。第九章 20→**21 条**、12.3 坑 1 / 12.4-D / 12.4-E 第 7 条 / 12.4-G / 12.5 提示词 / 第八章旋钮表 / FAQ Q17 同步。事故中手动 run `43353959891` 已主动 cancel，远端数据未被覆盖，仍为 `2026-11-11` |
 
-| 2026-11-13 v3.12 | 三层多源冗余 | 事故驱动：11-12 / 11-13 东财 `push2` **与 `push2his`** 同时限流，暴露「备用链路只覆盖代码清单层」的缺口。① 代码清单扩到四级（`stock_zh_a_spot` / `stock_zh_a_spot_tx` 加入，非东财）；② 指数日线三级（新浪 / 腾讯 fallback）；③ 逐股后复权历史按只 fallback（新浪 `stock_zh_a_daily` / 腾讯 `stock_zh_a_hist_tx`），由 `HIST_FALLBACK` 开关控制、**默认关闭**。新增 `trim_to_common_last()` 混源末端裁剪（`FALLBACK_COVER_RATIO=0.80`）、`_clean_pool()` 前缀清洗、`_hist_frame()` 字段标准化、日志按源分组、`probe_sources.py` + `probe-sources.yml` 海外 runner 探测、`llms.txt`「数据口径」行。实测：新浪 vs 腾讯 53365 个 `close>MA` 判定点 MA200 一致率 99.803%；新浪抽 281 只重算 11-11 MA200 15.30% vs 线上 15.35%（SE ±2.15pct）；东财限流下 300 只小样本 fallback 把成功率从 **14%（42/300）拉到 88%（264/300）**、三条指数曲线全部自动切新浪、数据日推进到 11-12。第九章 21→**22 条**、12.3 十一→**十二个坑**、12.4 七→**八类 SOP（新增 H）**、12.5 提示词 / FAQ Q18 / 第八章旋钮同步。`docs/` 未动，开关默认关闭时主链路行为与 v3.11 等价 |
+| 2026-11-13 v3.12 | 三层多源冗余 | 事故驱动：11-12 / 11-13 东财 `push2` **与 `push2his`** 同时限流，暴露「备用链路只覆盖代码清单层」的缺口。① 代码清单扩到四级（`stock_zh_a_spot` / `stock_zh_a_spot_tx` 加入，非东财）；② 指数日线三级（新浪 / 腾讯 fallback）；③ 逐股后复权历史按只 fallback（新浪 `stock_zh_a_daily` / 腾讯 `stock_zh_a_hist_tx`），由 `HIST_FALLBACK` 开关控制、**默认关闭**。新增 `trim_to_common_last()` 混源末端裁剪（`FALLBACK_COVER_RATIO=0.80`）、`_clean_pool()` 前缀清洗、`_hist_frame()` 字段标准化、日志按源分组、`probe_sources.py` + `probe-sources.yml` 海外 runner 探测、`llms.txt`「数据口径」行。实测：新浪 vs 腾讯 53365 个 `close>MA` 判定点 MA200 一致率 99.803%；新浪抽 281 只重算 11-11 MA200 15.30% vs 线上 15.35%（SE ±2.15pct）；东财限流下 300 只小样本 fallback 把成功率从 **14%（42/300）拉到 88%（264/300）**、三条指数曲线全部自动切新浪、数据日推进到 11-12。第九章 21→**22 条**、12.3 十一→**十二个坑**、12.4 七→**八类 SOP（新增 H）**、12.5 提示词 / FAQ Q18 / 第八章旋钮同步。`docs/` 未动，开关关闭时主链路行为与 v3.11 等价。**同日追加**：海外 runner 探测连续两次 `OVERSEAS_RUNNER_OK`（新浪逐股 95%→100%、腾讯 100%），据此在 `breadth.yml` 的 Compute 步骤写入 `HIST_FALLBACK: "1"` 启用开关；代码默认值仍为 0，东财正常时全部走主源、口径不变，仅限流时混源。探测脚本另补 `socket.setdefaulttimeout(8)` + 并发 8 + FAIL 不染红 CI（`exit 0` 恒成立）；并发版把探测从 5m12s 压到 3m17s |
 
 **交叉验证锚点**（两套完全不同数据源 / 复权方式）：
 

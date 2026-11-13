@@ -48,6 +48,11 @@ jobs:
         env:
           LIMIT: ${{ inputs.limit }}
           FORCE: ${{ inputs.force }}
+          # v3.12：probe-sources.yml 已在海外 runner 连续两次验证 OVERSEAS_RUNNER_OK
+          # （新浪逐股 95%/100%、腾讯 100%/100%），据此启用逐股历史按只 fallback。
+          # 东财正常时所有股票都走主源，口径与 v3.11 完全一致；仅东财限流时才混源。
+          # 限流解除、连续 2 次全量取数成功率 >=95% 后按 README 12.4-H 置回 "0"。
+          HIST_FALLBACK: "1"
         run: |
           ARGS="--out docs"
           if [ -n "$LIMIT" ] && [ "$LIMIT" != "0" ]; then ARGS="$ARGS --limit $LIMIT"; fi

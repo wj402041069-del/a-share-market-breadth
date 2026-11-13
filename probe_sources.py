@@ -25,7 +25,7 @@ import warnings
 warnings.filterwarnings("ignore")
 import akshare as ak
 
-PROBE_TIMEOUT = 8                 # 秒；与主程序 SOCKET_TIMEOUT=12 同族，探测可以更激进
+PROBE_TIMEOUT = 8                 # 秒；比主程序 SOCKET_TIMEOUT=12 更严格，探测能过则主程序必能过
 MAX_WORKERS = 8
 socket.setdefaulttimeout(PROBE_TIMEOUT)
 
