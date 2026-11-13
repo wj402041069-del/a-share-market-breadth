@@ -67,6 +67,7 @@ MAX_WORKERS = 10             # 境外 runner 逐只请求慢
 RETRY = 2
 SOCKET_TIMEOUT = 12          # akshare 内部 requests 未设超时，境外会挂死
 MIN_VALID = 1000             # 有效样本下限，低于此值拒绝覆盖
+MIN_FETCH_RATIO = 0.80       # 逐股取数成功率下限（代码池 >= 1000 只时启用），防「部分成功」污染 5 年曲线
 MAX_DIR_MB = 500
 SINGLE_FILE_MB = 50
 MIN_BARS = 51               # 进入计算所需最少日线（MA50 需 50 根 + 1）；改回 205 = 恢复「上市满 200 日才纳入」旧口径
@@ -1440,8 +1441,21 @@ def main() -> int:
 
     print(f"[2/6] 拉取 {len(codes)} 只股票的 {LOOKBACK_DAYS} 天后复权日线（并发 {MAX_WORKERS}）...", flush=True)
     data = fetch_all(codes, start, end)
+    ratio = len(data) / max(1, len(codes))
+    print(f"[2/6] 取数成功 {len(data):,}/{len(codes):,} 只（{ratio:.1%}）", flush=True)
+    # 三道护栏，缺一不可（详见 README 第九章第 3 / 21 条）：
+    #   ① 绝对下限 200 只：拦「几乎全挂」，小样本调试也走这条
+    #   ② 相对成功率 MIN_FETCH_RATIO：仅全市场规模（>=1000 只）启用，避免 --limit 调试被卡
+    #   ③ compute() 之后的有效样本下限 MIN_VALID
+    # ② 最关键：只取到 20~30% 时 ①③ 都会放行，但全量回算会用这批有偏样本
+    #    重写整条 5 年曲线，页面还显示「最新」，比直接失败更危险。
     if len(data) < 200:
         sys.exit(f"仅成功取到 {len(data)} 只，疑似接口被限流，本次不覆盖已有结果")
+    need = int(len(codes) * MIN_FETCH_RATIO)   # 用整数阈值，避免 80.0% 被浮点误差误拒
+    if len(codes) >= 1000 and len(data) < need:
+        sys.exit(f"仅成功取到 {len(data):,}/{len(codes):,} 只（{ratio:.1%}），"
+                 f"低于成功率护栏下限 {need:,} 只（{MIN_FETCH_RATIO:.0%}）；"
+                 f"疑似接口被部分限流，本次不覆盖已有结果（防止有偏样本重写 5 年曲线）")
 
     print("[3/6] 拉取沪深300 / 上证综指 / 创业板指日线...", flush=True)
     idx_maps = {} if a.no_index else fetch_indices(start, end)
