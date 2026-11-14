@@ -48,6 +48,16 @@ import csv
 import io
 import json
 import os
+
+
+# 自建 Worker 鉴权：密钥只从环境变量读取，绝不写进代码或提交历史
+def _worker_headers(extra=None):
+    h = dict(extra or {})
+    k = os.environ.get("A_STOCK_API_KEY", "")
+    if k:
+        h["X-API-Key"] = k
+    return h
+
 import socket
 import sys
 import time
@@ -258,7 +268,7 @@ def get_codes(limit: int, codes_file: str | None) -> tuple[list[str], dict]:
 def fetch_aux(timeout: int = 12) -> dict | None:
     try:
         req = urllib.request.Request(AUX_API + "/api/market-breadth",
-                                     headers={"User-Agent": "market-breadth-ci"})
+                                     headers=_worker_headers({"User-Agent": "market-breadth-ci"}))
         with urllib.request.urlopen(req, timeout=timeout) as r:
             d = json.load(r)
         if not d.get("total"):
