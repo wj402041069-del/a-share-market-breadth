@@ -28,6 +28,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      A_STOCK_API_KEY: ${{ secrets.A_STOCK_API_KEY }}
     timeout-minutes: 90
     env:
       TZ: Asia/Shanghai
