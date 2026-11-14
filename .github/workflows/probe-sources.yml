@@ -18,6 +18,8 @@ concurrency:
 jobs:
   probe:
     runs-on: ubuntu-latest
+    env:
+      A_STOCK_API_KEY: ${{ secrets.A_STOCK_API_KEY }}
     timeout-minutes: 15
     steps:
       - name: Checkout
