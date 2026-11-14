@@ -17,6 +17,8 @@ permissions:
 jobs:
   freshness:
     runs-on: ubuntu-latest
+    env:
+      A_STOCK_API_KEY: ${{ secrets.A_STOCK_API_KEY }}
     timeout-minutes: 5
     steps:
       - name: Checkout
