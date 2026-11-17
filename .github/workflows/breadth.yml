@@ -60,11 +60,19 @@ jobs:
           if [ -n "$LIMIT" ] && [ "$LIMIT" != "0" ]; then ARGS="$ARGS --limit $LIMIT"; fi
           if [ "$FORCE" = "true" ]; then ARGS="$ARGS --force"; fi
           # v3.14：底层 C 扩展偶发崩溃（segfault 139）或 push2 临时限流时自动重试一次。
+          # v3.15a（2026-11-17）：复核发现偶发原生崩溃与 runner 镜像 / 取数并发相关；
+          # 首次仍用默认并发，重试时降到 4（breadth.py 已有 --workers 参数），
+          # 减少 akshare / curl_cffi / pandas / numpy C 层并发竞争。
           # 成功立刻结束本 step；两次都失败才让 job 变红，提交步骤会被跳过，
           # 已有 docs/ 产物不会被有偏样本覆盖。
           for attempt in 1 2; do
+            ATTEMPT_ARGS="$ARGS"
+            if [ "$attempt" -eq 2 ]; then
+              ATTEMPT_ARGS="$ATTEMPT_ARGS --workers 4"
+            fi
             echo "::group::Compute attempt ${attempt}/2"
-            if python breadth.py $ARGS; then
+            echo "Compute args: $ATTEMPT_ARGS"
+            if python breadth.py $ATTEMPT_ARGS; then
               echo "::endgroup::"
               echo "第 ${attempt} 次重算成功"
               exit 0
@@ -74,7 +82,7 @@ jobs:
               echo "::error::连续 2 次重算失败，本次不覆盖已有结果"
               exit 1
             fi
-            echo "第 1 次失败，等待 60 秒后重试（不动已有产物）"
+            echo "第 1 次失败，等待 60 秒后重试（不动已有产物；并发降至 4）"
             sleep 60
           done
 
