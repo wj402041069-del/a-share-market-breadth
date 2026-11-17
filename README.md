@@ -379,7 +379,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 
 ## 九、防 Bug 铁律（改动代码前必读）
 
-> **以下 24 条均来自真实踩坑，严禁回退。**
+> **以下 25 条均来自真实踩坑，严禁回退。**
 
 1. **必须用后复权 `adjust="hfq"`**。严禁用不复权收盘价直接算 MA：除权日会假跌破，实测 MA200 占比差约 3 个百分点（24.61% vs 27.57%）。
 2. **`codes.txt` 兜底不能删，且每个在线源都有写回下限**（主源 ≥3000、备用源 ≥5000 只）。push2 对云出口有 WAF 502；把异常小的快照写进兜底文件，等于把一次限流放大成长期数据空洞。**头部 `# updated | source | count` 注释行不能删**，`read_codes_meta()` 靠它判断陈旧、`read_codes_file()` 靠「首字符是数字」跳过它。
@@ -419,6 +419,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 23. **改 workflow 的 YAML 必须先做重复键检查，否则定时任务会「静默停摆」**：2026-11-14 有 AI 给 4 个 workflow 加 `A_STOCK_API_KEY` 时，在 `breadth.yml` 的 `build` 下又写了一个 `env:`（原本已有 `env: TZ`）。同一 mapping 两个同名键，PyYAML 默认「后者覆盖前者」不报错，但 **GitHub Actions 直接判 workflow 无效**：① 每次 push 生成一个名为 `.github/workflows/breadth.yml` 的失败 run（正常应显示 `A-share Market Breadth`）；② **16:30 / 18:00 的定时触发从此完全消失，连失败记录都没有**；③ 页面只能靠新鲜度横幅发现，数据停在 `2026-11-13` 整整 4 天。修法：两个 `env:` 合并成一个（`TZ` + `A_STOCK_API_KEY` 并列），Compute 步骤自己的 `env:` 保持不动。铁律：① 同一层级绝不写两个同名键，加变量请**合并进已有 `env:` 块**；② 改完必须跑 `python check_workflows.py`（零依赖，检测重复键与 `schedule` 缺失，已挂在 `probe-sources.yml` 每周跑）；③ 排障先看最近 run 的**名字**，出现文件路径就是解析失败、不是取数失败；④ 定时任务「没有运行记录」不等于「没到点」，先查 workflow 文件是否被改坏；⑤ 加了 `A_STOCK_API_KEY` 这类 job 级变量后，务必确认 `HIST_FALLBACK` 等步骤级 `env:` 没被覆盖。
 
 24. **「依赖版本漂移崩溃」和「workflow 静默停摆」要分开归因，且依赖必须精确锁死**：2026-11-17 修好 workflow 后手动补跑，run `43986097724` 仍在 `Compute market breadth` 失败——但这次**不是数据源、也不是护栏**，日志是进程级 `Segmentation fault (core dumped)` / `exit code 139`，发生在 `[2/6] 拉取 5577 只...` 后 3 分 43 秒，连第一个「历史日线 500/5577」进度都没打出来。对照 11-13 成功 run `43386707286`：26 个已安装包、runner 镜像（`GitHub Actions 1000`）完全一致，**唯一差异是 `numpy<3` 自动解析到 2.5.5（成功时 2.5.4）**。修法：① `requirements.txt` 改为 `pandas==2.3.3 / numpy==2.5.4` 精确锁（连同 `akshare==1.20.35`），锁回连续 3 次全量验证过的组合；② `check_workflows.py` 新增 `check_pins()` 断言三者必须是 `pkg==x.y.z`，输出 `DEPS_PIN_OK/FAIL`；③ `breadth.yml` 的 Compute 步骤改为最多 2 次尝试、中间等 60 秒，两次都失败才让 job 变红（提交步骤跳过，已有 `docs/` 不会被覆盖），`timeout-minutes` 90→150 容纳重试。铁律：① 范围约束（`numpy<3` / `pandas>=2`）一律禁止，PyPI 发新版就会静默换掉 CI 环境；② 排障先看**退出码与错误类型**——`exit 139 / Segmentation fault` 是进程崩溃，不是「取数成功 N 只」那种业务护栏失败，别去调 `MIN_FETCH_RATIO` 或反复 `force=true`；③ 对比失败 / 成功两次 run 的 `Successfully installed` 整行，能在几分钟内锁定漂移的包；④ 升级依赖必须先在 CI 跑 `--limit 200` smoke test + 一次全量重算，两次通过才许改 pin（见 12.4-F）。
+
+25. **Worker 鉴权链路是防「复制仓库蹭额度」的唯一闸门，4 个 workflow 一个都不能少**：密钥只放在 GitHub 仓库 Secret `A_STOCK_API_KEY`（Settings → Secrets → Actions），4 个 workflow 各自用 `A_STOCK_API_KEY: ${{ secrets.A_STOCK_API_KEY }}` 注入，`breadth.py` 的 `_worker_headers()` 从环境变量读出来放进 `X-API-Key` 请求头，**仓库里绝不写明文**。原理：GitHub 硬规则是 fork **不继承 Secrets**，而 Worker（`wj624/a-stock-api` 的 `worker.js:1197`）对所有 `/api/*` 强制校验 `X-API-Key !== env.API_KEY` → 401；别人 fork / 复制仓库后拿不到 key，自然蹭不到额度。根路径 `/` 不校验，但只返回接口清单、不含行情数据，属预期。`check_workflows.py` 已把这条做成静态门禁 `WORKER_KEY_OK/FAIL`：任何一个 workflow 漏写引用、或代码丢了 `X-API-Key` / 出现明文令牌，CI 直接红。**严禁为了让 workflow 变简单而删这个 env，也严禁把 key 写进 README / 代码 / 提示词。**
 
 > 另外两条工程经验：`docs/breadth.csv` 用 `utf-8-sig` 写 BOM，否则 Excel 打开中文表头乱码；本地通达信 `.day` 是 **32 字节小端**结构，早期解析踩过字节序坑（云端版不读 `.day`，但别把两套代码混着改）。
 
@@ -483,7 +485,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 |---|---|---|
 | `breadth.py` | **单一主程序**：取数、复权、日历、矩阵计算、CSV/HTML 生成、运行时护栏、全部常量 | 改常量会直接改变口径；改 `compute` 的分母逻辑会静默污染 5 年曲线 |
 | `housekeeping.py` | 纯标准库体积裁剪，供 `maintenance.yml` 调用 | 不依赖 akshare，别顺手 import 进来 |
-| `check_workflows.py` | 零依赖静态体检：workflow 重复键 / `schedule` 缺失 / 依赖精确锁 | 故意让 CI 变红，别改成「只警告不失败」；应输出 `WORKFLOW_YAML_OK` + `DEPS_PIN_OK` + `ALL_CHECKS_OK` |
+| `check_workflows.py` | 零依赖静态体检：workflow 重复键 / `schedule` 缺失 / 依赖精确锁 / Worker 鉴权链路 | 故意让 CI 变红，别改成「只警告不失败」；应输出 `WORKFLOW_YAML_OK` + `DEPS_PIN_OK` + `WORKER_KEY_OK` + `ALL_CHECKS_OK` |
 | `codes.txt` | 5923 只代码快照 + **首行日期标记**，随仓库提交的数据资产 | 删了 / 写坏会让一次 WAF 限流放大成长期空洞；删掉首行 `# updated` 会让陈旧保护失效 |
 | `.github/workflows/breadth.yml` | 双 cron、取数、提交 | 改 cron 记得按 UTC 换算；`timeout-minutes` 150 不能减（v3.14 起容纳一次自动重试）；同一层级不许出现两个 `env:` |
 | `.github/workflows/maintenance.yml` | 每周体积体检 | 阈值 512000 KB、护栏、不 force push 是硬约束 |
@@ -609,7 +611,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 【先读什么】
 1. README 第三章「数据源、单位与剔除项」→ 认清主链路（AKShare 东财逐股后复权日线）
    与辅助链路（a-stock-api Worker 当日快照）。
-2. README 第九章「防 Bug 铁律」24 条 → 全部来自真实踩坑，禁止回退（尤其第 21 条「部分成功必须拒绝覆盖」、第 22 条「多源分层 / 整段同源 / 海外验证前置」、第 23 条「workflow 重复键会让定时静默停摆」、第 24 条「依赖精确锁 + 三类失败分开归因」）。
+2. README 第九章「防 Bug 铁律」25 条 → 全部来自真实踩坑，禁止回退（尤其第 21 条「部分成功必须拒绝覆盖」、第 22 条「多源分层 / 整段同源 / 海外验证前置」、第 23 条「workflow 重复键会让定时静默停摆」、第 24 条「依赖精确锁 + 三类失败分开归因」、第 25 条「Worker 鉴权 4 个 workflow 一个都不能少」）。
 3. README 第十二章 → 12.1 文件职责表、12.3 十四个坑、12.4 八类 SOP（尤其 E「数据过期排查」、F「akshare 升级/接口挂了」、G「llms.txt 缺失/过期/N/A」、H「多源开关启用/关闭」）；改股票池前读 3.5，改图表前读第五章（尤其 5.4 默认显隐），改 AI 文本输出前读第九章第 20 条。
 4. 要动 Worker 时读 https://github.com/wj624/a-stock-api 的 README。
 
@@ -650,7 +652,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
   llms.txt 的「默认 5 年周期 Spread」必须与之一致。
 - 仓库内绝不写任何 PAT；CI 用 GITHUB_TOKEN。
 - 绝不 force push、不重写 main 历史；500MB 清理只裁剪 docs/ 数据。
-- 改 .github/workflows/*.yml 后必须跑 python check_workflows.py（应同时输出 WORKFLOW_YAML_OK / DEPS_PIN_OK / ALL_CHECKS_OK）；同一层级不准出现两个
+- 改 .github/workflows/*.yml 后必须跑 python check_workflows.py（应同时输出 WORKFLOW_YAML_OK / DEPS_PIN_OK / WORKER_KEY_OK / ALL_CHECKS_OK）；同一层级不准出现两个
   env: / jobs: / on:，加变量一律合并进已有 env 块。run 名字变成文件路径 = YAML 解析失败
   （不是取数失败）；定时任务「没有运行记录」先怀疑 workflow 被改坏，别急着怪数据源。
 - 失败归因先分三类：① 无 run / run 名字是文件路径 = workflow 解析失败（第 23 条）；
@@ -671,7 +673,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 6. python check_freshness.py  # 应输出 FRESH 且 exit 0（改过页面新鲜度口径后尤其要跑，确保 Python/JS 两套判断一致）。
 7. 确认 docs/llms.txt 存在：首行「最新数据日」== breadth.csv 最后一行 date，
    grep -c 'N/A' docs/llms.txt 为 0，且线上 .../llms.txt 返回 200；改过 write_llms() 必须重新生成。
-8. python check_workflows.py → 必须同时出现 WORKFLOW_YAML_OK / DEPS_PIN_OK / ALL_CHECKS_OK；
+8. python check_workflows.py → 必须同时出现 WORKFLOW_YAML_OK / DEPS_PIN_OK / WORKER_KEY_OK / ALL_CHECKS_OK；
    确认 requirements.txt 三个都是 pkg==x.y.z 精确锁，没有 <3 / >=。
 
 【提交规范】
@@ -686,6 +688,7 @@ commit message 用中文，说明「改了什么 + 为什么」；涉及口径�
 3. 改完能不能用 2026-09-21 MA200 ≈ 27.45% 这个锚点验证口径没跑偏？
 4. 动过 `.github/workflows/*.yml` 吗？跑了 `python check_workflows.py` 吗？定时任务还在吗？
 5. 动过 `requirements.txt` 吗？三个包还是 `pkg==x.y.z` 精确锁吗？`DEPS_PIN_OK` 吗？
+   Worker 鉴权还在吗？4 个 workflow 都有 `A_STOCK_API_KEY` 引用吗？`WORKER_KEY_OK` 吗？
 6. 这次失败是「没 run」「护栏拦下」还是「exit 139 进程崩溃」？三类别混为一谈。
 
 ## 十三、版本记录与实测锚点
@@ -714,6 +717,8 @@ commit message 用中文，说明「改了什么 + 为什么」；涉及口径�
 | 2026-11-17 v3.13 | workflow 停摆修复 | 事故：11-14 18:25（北京）有 AI 给 4 个 workflow 插 `A_STOCK_API_KEY` 时，在 `breadth.yml` 的 `build` 下新增第二个 `env:`，与原有 `env: TZ` 重复 → GitHub Actions 判 workflow 无效 → 11-14 起 16:30/18:00 定时触发**完全消失**（连失败 run 都没有），数据停在 `2026-11-13` 4 天，仅靠页面红色横幅发现。修复：合并为单个 `env:`（`TZ` + `A_STOCK_API_KEY`），保留 Compute 步骤的 `HIST_FALLBACK=1`；本地/远端 5 个文件同步；dispatch 验证 run 名字恢复为 `A-share Market Breadth`。防护：新增零依赖 `check_workflows.py`（重复键 + `schedule` 缺失检测，挂到 `probe-sources.yml` 每周跑、失败即红并通知）；第九章 22→**23 条**、12.3 十二→**十三个坑**、12.4-D 新增第 5 条、12.5 提示词、12.6 自检同步。注：11-13 三次重算曾成功把数据推进到 11-13，`llms.txt` 记录「东财 46 / 新浪 5,497 只」，证明 v3.12 多源 fallback 在真实全市场下有效 |
 
 | 2026-11-17 v3.14 | 依赖精确锁 + 崩溃自愈 | 承接 v3.13：workflow 修好后手动补跑 run `43986097724` 仍在 Compute 失败，日志为进程级 `Segmentation fault (core dumped)` / `exit code 139`（`[2/6]` 后 3m43s 崩溃、无护栏文案、提交 skipped）。对照 11-13 成功 run `43386707286`：26 个包与 runner 镜像完全一致，**唯一差异 `numpy<3` 自动解析到 2.5.5（成功时 2.5.4）**。修复：① `requirements.txt` 改 `pandas==2.3.3 / numpy==2.5.4` 精确锁；② `check_workflows.py` 新增 `check_pins()`，输出 `DEPS_PIN_OK/FAIL`，与 `WORKFLOW_YAML_OK` 一起汇成 `ALL_CHECKS_OK`；③ `breadth.yml` Compute 步骤加最多 2 次尝试（间隔 60s，两次都失败才红、不覆盖 docs/），`timeout-minutes` 90→150。第九章 23→**24 条**、12.3 十三→**十四个坑**、12.4-D/F、FAQ Q19、12.5 提示词、12.6 自检、第六 / 八 / 十二章同步；云端巡检提示词同步「三类失败归因」与依赖锁硬约束。`docs/` 未手改，由流水线重算推进 |
+
+| 2026-11-17 v3.14a | Worker 密钥门禁 | 用户确认「需要 Worker 密钥防复制仓库蹭额度」。核对结论：仓库 Secret `A_STOCK_API_KEY` 存在（11-14 更新）、4 个 workflow 全部引用、`breadth.py` 从环境变量读入 `X-API-Key`、仓库内 0 处明文；Worker 源码 `worker.js:1197` 对除 `/` 外所有路径强制校验 `X-API-Key !== env.API_KEY` → 401（`/` 只返回接口清单不含数据）。GitHub fork 不继承 Secrets，故复制仓库者拿不到 key。加固：新增 `check_worker_key()` 静态门禁输出 `WORKER_KEY_OK/FAIL`（4 个 workflow 引用 + 代码读取 + 无明文），反向测试删引用能准确拦截；第九章 24→**25 条**、12.1 文件表 / 12.5 提示词 / 12.6 自检 / 版本记录同步。远端提交 `38b48c3207` |
 
 **交叉验证锚点**（两套完全不同数据源 / 复权方式）：
 
