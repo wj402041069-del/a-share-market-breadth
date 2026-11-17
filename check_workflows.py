@@ -8,9 +8,14 @@
 `.github/workflows/breadth.yml` 的失败 run，之后 16:30 / 18:00 的定时触发
 **完全消失且没有任何失败记录**，只能靠页面新鲜度横幅发现。
 
-本脚本检查两件事：
+本脚本检查三件事：
   ① 同一缩进层级是否出现重复的 mapping 键（重点看 env / jobs / on / steps / name）；
-  ② 四个定时 workflow 是否还保留 `schedule:`（防止误删后定时任务静默消失）。
+  ② 四个定时 workflow 是否还保留 `schedule:`（防止误删后定时任务静默消失）；
+  ③ requirements.txt 里 akshare / pandas / numpy 是否精确锁成 pkg==x.y.z。
+
+第 ③ 条来自 2026-11-17 事故：原本 `numpy<3` 自动漂到 2.5.5（11-13 成功时是
+2.5.4），26 个包里只有它变了，取数阶段并发调用 pandas/numpy C 层直接
+Segmentation fault (exit 139)。范围约束 = 把 CI 环境交给 PyPI 抽签，必须禁止。
 
 改完 `.github/workflows/*.yml` 必须本地跑一次；CI 里由 probe-sources.yml 每周跑一次。
 退出码 0 = 健康，1 = 有问题（这里**故意**让 CI 变红，好让 GitHub 立刻通知）。
@@ -66,8 +71,26 @@ def check(path: str) -> list[str]:
     return problems
 
 
+def check_pins(root: str) -> list[str]:
+    """akshare / pandas / numpy 必须是 pkg==x.y.z，不允许 >= / < / ~= / 裸包名。"""
+    path = os.path.join(root, "requirements.txt")
+    if not os.path.exists(path):
+        return ["requirements.txt 缺失"]
+    with open(path, encoding="utf-8") as f:
+        lines = [l.strip() for l in f if l.strip() and not l.strip().startswith("#")]
+    problems: list[str] = []
+    for pkg in ("akshare", "pandas", "numpy"):
+        found = [l for l in lines if re.match(rf"^{pkg}\b", l)]
+        if len(found) != 1:
+            problems.append(f"{pkg} 应恰好有 1 条约束，实际 {len(found)} 条")
+        elif not re.fullmatch(rf"{pkg}==\d+\.\d+\.\d+", found[0]):
+            problems.append(f"{pkg} 未精确锁版本：'{found[0]}'，必须写 {pkg}==x.y.z")
+    return problems
+
+
 def main() -> int:
-    files = sorted(glob.glob(os.path.join(os.path.dirname(__file__),
+    root = os.path.dirname(__file__)
+    files = sorted(glob.glob(os.path.join(root,
                                          ".github", "workflows", "*.yml")))
     if not files:
         print("FAIL 没找到任何 workflow 文件")
@@ -84,7 +107,18 @@ def main() -> int:
         else:
             print(f"OK   {name}")
     print("WORKFLOW_YAML_OK" if not bad else f"WORKFLOW_YAML_FAIL ({bad} 个文件有问题)")
-    return 1 if bad else 0
+
+    pin_issues = check_pins(root)
+    if pin_issues:
+        print("DEPS_PIN_FAIL  requirements.txt 存在版本漂移风险")
+        for x in pin_issues:
+            print("     -", x)
+    else:
+        print("DEPS_PIN_OK   akshare / pandas / numpy 均已精确锁版本")
+
+    ok = not bad and not pin_issues
+    print("ALL_CHECKS_OK" if ok else "CHECKS_FAIL（见上方 FAIL 明细）")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

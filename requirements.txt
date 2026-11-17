@@ -1,4 +1,11 @@
-# 版本锁定：akshare 接口会变；pandas 3.x 移除了 resample('M') 等 API，必须锁 <3
+# 版本锁定：akshare 接口会变；pandas 3.x 移除了 resample('M') 等 API
+# v3.14：numpy / pandas 必须精确锁死，不准写 <3 这类范围约束。
+#   2026-11-17 CI 自动解析到 numpy 2.5.5（11-13 成功时是 2.5.4），
+#   其余 25 个包与 runner 镜像完全一致，逐股取数阶段并发调用 pandas/numpy C 层
+#   直接 Segmentation fault (exit 139)，3 分 43 秒崩溃、提交被跳过。
+#   这里锁回 11-13 连续 3 次全量重算成功验证过的组合。
+#   要升级：先在 CI 跑一次 --limit 200 的 smoke test + 一次全量重算，
+#   两次都通过才允许改这里的版本号（见 README 12.4-F）。
 akshare==1.20.35
-pandas<3
-numpy<3
+pandas==2.3.3
+numpy==2.5.4
