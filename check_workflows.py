@@ -88,6 +88,39 @@ def check_pins(root: str) -> list[str]:
     return problems
 
 
+def check_worker_key(root: str) -> list[str]:
+    """Worker 鉴权链路不能被删：4 个 workflow 引用 Secret + 代码只读环境变量。
+
+    背景：密钥是防止别人 fork / 复制仓库蹭自建 Worker 额度的唯一闸门。
+    GitHub 的硬规则是 fork 不继承 Secrets，Worker 端对所有 /api/* 强制校验
+    X-API-Key（见 wj624/a-stock-api worker.js:1197）。任何一环被删，别人
+    复制仓库就能白嫖；而仓库里又不能写明文密钥，所以静态体检是唯一防线。
+    """
+    problems: list[str] = []
+    workflows = ("breadth.yml", "freshness.yml", "maintenance.yml", "probe-sources.yml")
+    ref = "A_STOCK_API_KEY: ${{ secrets.A_STOCK_API_KEY }}"
+    for name in workflows:
+        p = os.path.join(root, ".github", "workflows", name)
+        if not os.path.exists(p):
+            problems.append(f"缺少 {name}")
+            continue
+        with open(p, encoding="utf-8") as f:
+            if ref not in f.read():
+                problems.append(f"{name} 缺少 `{ref}`（Worker 鉴权失效）")
+    code = os.path.join(root, "breadth.py")
+    if not os.path.exists(code):
+        problems.append("缺少 breadth.py")
+    else:
+        with open(code, encoding="utf-8") as f:
+            src = f.read()
+        for token in ('os.environ.get("A_STOCK_API_KEY"', '"X-API-Key"'):
+            if token not in src:
+                problems.append(f"breadth.py 缺少 `{token}`（Worker 鉴权失效）")
+        if re.search(r"ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}", src):
+            problems.append("breadth.py 出现明文令牌")
+    return problems
+
+
 def main() -> int:
     root = os.path.dirname(__file__)
     files = sorted(glob.glob(os.path.join(root,
@@ -116,7 +149,15 @@ def main() -> int:
     else:
         print("DEPS_PIN_OK   akshare / pandas / numpy 均已精确锁版本")
 
-    ok = not bad and not pin_issues
+    key_issues = check_worker_key(root)
+    if key_issues:
+        print("WORKER_KEY_FAIL  Worker 鉴权链路不完整（别人复制仓库可能蹭额度）")
+        for x in key_issues:
+            print("     -", x)
+    else:
+        print("WORKER_KEY_OK    4 个 workflow 引用 Secret，代码只读环境变量、无明文")
+
+    ok = not bad and not pin_issues and not key_issues
     print("ALL_CHECKS_OK" if ok else "CHECKS_FAIL（见上方 FAIL 明细）")
     return 0 if ok else 1
 
