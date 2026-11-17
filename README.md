@@ -334,7 +334,7 @@ Spread[i] = MA200 占比分位[i] − 基准指数分位[i]        取值 −100
 ## 六、GitHub Actions 部署与定时
 
 - 仓库：`wj402041069-del/a-share-market-breadth`（public，Pages 源为 `main` / `docs`）
-- `breadth.yml`：`cron: '30 8 * * 1-5'`（北京 16:30）+ `'0 10 * * 1-5'`（北京 18:00 兜底），`timeout-minutes: 90`
+- `breadth.yml`：`cron: '30 8 * * 1-5'`（北京 16:30）+ `'0 10 * * 1-5'`（北京 18:00 兜底），`timeout-minutes: 150`（v3.14 起；单次全量约 51 分钟，需容纳一次自动重试）
 - GitHub 的 cron 一律按 **UTC** 解释，且不保证准时；双 cron 就是为此准备的。第二次若发现辅助源日期 == CSV 最后日期，脚本**幂等跳过**，几乎零成本
 - `maintenance.yml`：每周一北京 11:00 读仓库 `size`，**< 512000 KB 一个字节都不改**；达到阈值才裁剪 CSV 到 365 天 / 删旧快照，正常 commit，**绝不 force push、不重写 main 历史**
 - CI 提交用 `GITHUB_TOKEN`（workflow 已声明 `permissions: contents: write`），**不需要任何 PAT / Secrets**
@@ -379,7 +379,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 
 ## 九、防 Bug 铁律（改动代码前必读）
 
-> **以下 23 条均来自真实踩坑，严禁回退。**
+> **以下 24 条均来自真实踩坑，严禁回退。**
 
 1. **必须用后复权 `adjust="hfq"`**。严禁用不复权收盘价直接算 MA：除权日会假跌破，实测 MA200 占比差约 3 个百分点（24.61% vs 27.57%）。
 2. **`codes.txt` 兜底不能删，且每个在线源都有写回下限**（主源 ≥3000、备用源 ≥5000 只）。push2 对云出口有 WAF 502；把异常小的快照写进兜底文件，等于把一次限流放大成长期数据空洞。**头部 `# updated | source | count` 注释行不能删**，`read_codes_meta()` 靠它判断陈旧、`read_codes_file()` 靠「首字符是数字」跳过它。
@@ -387,8 +387,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 4. **停牌日不计入当日分母，每档均线独立分母**。把 MA200 无值的股票算成「未站上」，会让 5 年曲线左端系统性偏低且不会报错。
 5. **交易日历用全市场个股日期并集（阈值 30%）**，严禁只依赖指数文件。本地版用上证指数日历时曾误剔 920 只股票。
 6. **红涨绿跌**：上涨 `#d64545`、下跌 `#1f9d6b`。严禁反色。
-7. **依赖锁死 `akshare==1.20.35 / pandas<3 / numpy<3`**。pandas 3.x 移除 `resample('M')` 等 API，会打断 akshare 内部逻辑；升级前必须本地全量验证。**版本升级 / 接口挂了的完整处置见 12.4-F**（先小样本试装 → 过 2026-09-21 / 2026-11-06 两个锚点 → 才改 pin，不过就回滚；严禁无脑 `pip -U` 直接上线）。
-8. **境外 runner 四件套不能删**：`socket.setdefaulttimeout(12)`、并发 10、重试 2、`timeout-minutes: 90`。akshare 内部 `requests` 未设超时，境外遇连接问题会挂死；实测 v2 全量重算 19.9 分钟成功、幂等跳过 0.4 分钟，v3 改 5 年窗口后取数更重，故上限留到 90 分钟。
+7. **依赖必须精确锁版本**：`akshare==1.20.35 / pandas==2.3.3 / numpy==2.5.4`。pandas 3.x 移除 `resample('M')` 等 API 会打断 akshare 内部逻辑；**范围约束（`<3` / `>=`）等于把 CI 环境交给 PyPI 抽签**——2026-11-17 `numpy<3` 自动漂到 2.5.5（11-13 成功时 2.5.4），26 个包里只有它变了，逐股取数阶段并发调用 pandas/numpy C 层直接 `Segmentation fault (exit 139)`（详见第 24 条）。`python check_workflows.py` 会断言三者都是 `pkg==x.y.z`，写成范围约束 CI 直接红。升级流程见 12.4-F（先小样本 → 过 2026-09-21 / 2026-11-06 两个锚点 → 才改 pin，不过就回滚；严禁无脑 `pip -U`）。
+8. **境外 runner 四件套不能删**：`socket.setdefaulttimeout(12)`、并发 10、重试 2、`timeout-minutes: 150`（v3.14 起）。akshare 内部 `requests` 未设超时，境外遇连接问题会挂死；实测 v2 全量重算 19.9 分钟，v3 改 5 年窗口 + v3.12 混源后单次约 51 分钟，Compute 步骤还会自动重试一次，故上限留到 150 分钟。**别改回 90**：第二次重试会被硬超时掐断。
 9. **5 年历史是「当前股票池回算」**，有幸存者偏差。严禁在页面 / 文档里表述为「当时的真实全市场宽度」。
 10. **HTML 用唯一占位符 `__XXX__` 整段替换，不用 f-string 拼整页 JS**。一处括号转义错整页图表全废；生成后必须抽出 `<script>` 跑 `node --check`。
 11. **仓库内绝不写任何 PAT / Token**，CI 用 `GITHUB_TOKEN`；提交前 `grep -R "ghp_"` 扫一遍。
@@ -417,6 +417,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
     - `docs/llms.txt` 的「数据口径」行由 `write_llms()` 按 `source_stats` 自动生成，写明各源只数与裁剪日；严禁手改。
 
 23. **改 workflow 的 YAML 必须先做重复键检查，否则定时任务会「静默停摆」**：2026-11-14 有 AI 给 4 个 workflow 加 `A_STOCK_API_KEY` 时，在 `breadth.yml` 的 `build` 下又写了一个 `env:`（原本已有 `env: TZ`）。同一 mapping 两个同名键，PyYAML 默认「后者覆盖前者」不报错，但 **GitHub Actions 直接判 workflow 无效**：① 每次 push 生成一个名为 `.github/workflows/breadth.yml` 的失败 run（正常应显示 `A-share Market Breadth`）；② **16:30 / 18:00 的定时触发从此完全消失，连失败记录都没有**；③ 页面只能靠新鲜度横幅发现，数据停在 `2026-11-13` 整整 4 天。修法：两个 `env:` 合并成一个（`TZ` + `A_STOCK_API_KEY` 并列），Compute 步骤自己的 `env:` 保持不动。铁律：① 同一层级绝不写两个同名键，加变量请**合并进已有 `env:` 块**；② 改完必须跑 `python check_workflows.py`（零依赖，检测重复键与 `schedule` 缺失，已挂在 `probe-sources.yml` 每周跑）；③ 排障先看最近 run 的**名字**，出现文件路径就是解析失败、不是取数失败；④ 定时任务「没有运行记录」不等于「没到点」，先查 workflow 文件是否被改坏；⑤ 加了 `A_STOCK_API_KEY` 这类 job 级变量后，务必确认 `HIST_FALLBACK` 等步骤级 `env:` 没被覆盖。
+
+24. **「依赖版本漂移崩溃」和「workflow 静默停摆」要分开归因，且依赖必须精确锁死**：2026-11-17 修好 workflow 后手动补跑，run `43986097724` 仍在 `Compute market breadth` 失败——但这次**不是数据源、也不是护栏**，日志是进程级 `Segmentation fault (core dumped)` / `exit code 139`，发生在 `[2/6] 拉取 5577 只...` 后 3 分 43 秒，连第一个「历史日线 500/5577」进度都没打出来。对照 11-13 成功 run `43386707286`：26 个已安装包、runner 镜像（`GitHub Actions 1000`）完全一致，**唯一差异是 `numpy<3` 自动解析到 2.5.5（成功时 2.5.4）**。修法：① `requirements.txt` 改为 `pandas==2.3.3 / numpy==2.5.4` 精确锁（连同 `akshare==1.20.35`），锁回连续 3 次全量验证过的组合；② `check_workflows.py` 新增 `check_pins()` 断言三者必须是 `pkg==x.y.z`，输出 `DEPS_PIN_OK/FAIL`；③ `breadth.yml` 的 Compute 步骤改为最多 2 次尝试、中间等 60 秒，两次都失败才让 job 变红（提交步骤跳过，已有 `docs/` 不会被覆盖），`timeout-minutes` 90→150 容纳重试。铁律：① 范围约束（`numpy<3` / `pandas>=2`）一律禁止，PyPI 发新版就会静默换掉 CI 环境；② 排障先看**退出码与错误类型**——`exit 139 / Segmentation fault` 是进程崩溃，不是「取数成功 N 只」那种业务护栏失败，别去调 `MIN_FETCH_RATIO` 或反复 `force=true`；③ 对比失败 / 成功两次 run 的 `Successfully installed` 整行，能在几分钟内锁定漂移的包；④ 升级依赖必须先在 CI 跑 `--limit 200` smoke test + 一次全量重算，两次通过才许改 pin（见 12.4-F）。
 
 > 另外两条工程经验：`docs/breadth.csv` 用 `utf-8-sig` 写 BOM，否则 Excel 打开中文表头乱码；本地通达信 `.day` 是 **32 字节小端**结构，早期解析踩过字节序坑（云端版不读 `.day`，但别把两套代码混着改）。
 
@@ -458,6 +460,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 
 **Q18：能不能多加几个数据源，让限流时也不停更？** 能，但要分层加，而且**这次事故卡住的不是「源少」**。代码清单层已扩到四级（东财 / 新浪 / 腾讯 / `codes.txt`）、指数层三级，这两层主源挂了自动切、无口径风险；真正会让数据停更的是**逐股后复权历史层**，v3.12 已内置新浪 / 腾讯按只 fallback，但用 `HIST_FALLBACK` 开关默认关闭——因为不同源复权基准不同、替代源比东财晚 1 个交易日，且**本机国内 IP 测通不代表 GitHub Actions 海外 runner 测通**。开启流程见 12.4-H，铁律见第九章第 22 条。**注意**：`stock_info_a_code_name` 成功、单只 `stock_zh_a_hist(000001)` 成功，都不代表批量 5924 次能过，东财限流是分接口 / 概率性的。
 
+**Q19：Actions 日志出现 `Segmentation fault (core dumped)` / `exit code 139` 是什么问题？** 这是**进程级崩溃**，不是数据过期、不是接口限流、也不是三道护栏拦截。特征：`Compute market breadth` 步骤在 `[2/6] 拉取 ...（并发 10）` 之后几分钟内突然退出，没有任何 `[2/6] 取数成功 N/M 只` 或护栏文案，提交步骤被 skipped，`docs/` 保持旧数据不变。2026-11-17 实测根因是 `numpy<3` 自动漂到 2.5.5（11-13 成功时 2.5.4），多线程里 pandas/numpy C 扩展崩溃。排查：把失败 run 与上一次成功 run 的 `Install dependencies` 日志里 `Successfully installed` 整行逐包对比，通常只有一个包版本不同；然后按 12.4-F 把 `requirements.txt` 锁回已验证的精确版本，跑 `python check_workflows.py` 应得 `DEPS_PIN_OK`。**别做的事**：调低 `MIN_FETCH_RATIO`、反复 `force=true`、改 `fetch_all()` 并发数「碰运气」、或把这当成限流去关 `HIST_FALLBACK`。v3.14 起 Compute 步骤已内置一次自动重试，偶发崩溃可自愈。
+
 ## 十一、已知限制与免责声明
 
 1. **幸存者偏差**：5 年历史用当前股票池回算，早期分母偏小，越往前偏差越大。
@@ -479,10 +483,11 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 |---|---|---|
 | `breadth.py` | **单一主程序**：取数、复权、日历、矩阵计算、CSV/HTML 生成、运行时护栏、全部常量 | 改常量会直接改变口径；改 `compute` 的分母逻辑会静默污染 5 年曲线 |
 | `housekeeping.py` | 纯标准库体积裁剪，供 `maintenance.yml` 调用 | 不依赖 akshare，别顺手 import 进来 |
+| `check_workflows.py` | 零依赖静态体检：workflow 重复键 / `schedule` 缺失 / 依赖精确锁 | 故意让 CI 变红，别改成「只警告不失败」；应输出 `WORKFLOW_YAML_OK` + `DEPS_PIN_OK` + `ALL_CHECKS_OK` |
 | `codes.txt` | 5923 只代码快照 + **首行日期标记**，随仓库提交的数据资产 | 删了 / 写坏会让一次 WAF 限流放大成长期空洞；删掉首行 `# updated` 会让陈旧保护失效 |
-| `.github/workflows/breadth.yml` | 双 cron、取数、提交 | 改 cron 记得按 UTC 换算；`timeout-minutes` 90 不能减 |
+| `.github/workflows/breadth.yml` | 双 cron、取数、提交 | 改 cron 记得按 UTC 换算；`timeout-minutes` 150 不能减（v3.14 起容纳一次自动重试）；同一层级不许出现两个 `env:` |
 | `.github/workflows/maintenance.yml` | 每周体积体检 | 阈值 512000 KB、护栏、不 force push 是硬约束 |
-| `requirements.txt` | `akshare==1.20.35 / pandas<3 / numpy<3` | 放开 `pandas<3` 会在某次升级后静默打断 akshare |
+| `requirements.txt` | `akshare==1.20.35 / pandas==2.3.3 / numpy==2.5.4` | 改成范围约束会引入版本漂移：v3.14 前 `numpy<3` 漂到 2.5.5 直接 segfault 139 |
 | `docs/index.html` | 生成物，ECharts 看板 | 别手改，下次运行会覆盖；要改去改 `HTML_TEMPLATE` |
 | `docs/breadth.csv` | 生成物，最多 1300 行 | 别当临时缓存清理 |
 | `docs/llms.txt` | 生成物，给 AI 的纯文本摘要，由 `write_llms()` 用同一个 `res` 生成 | **严禁手改**；手改会让它与 CSV 数据日脱节、静默过期。改文案改 `breadth.py` 的 `write_llms()`，改完离线重生成一次 |
@@ -504,7 +509,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 - Worker 属于另一个仓库 `wj624/a-stock-api`，它没有逐股历史与复权，**严禁把它接成主数据源**。
 - 只要 `/api/market-breadth` 的 `date` 字段不变，本项目一行都不用改。
 
-### 12.3 十三个必踩坑（按踩坑频率排序）
+### 12.3 十四个必踩坑（按踩坑频率排序）
 
 1. **空数组 ≠ 没数据，半数组更危险**：Worker 曾把上游失败吞成 `200 + {"data":[]}` 并缓存；本项目对应防线是「取数成功 <200 → 成功率 <80% → 有效样本 <1000」三道护栏 + 拒绝覆盖。**只取到 25~30% 股票时 CI 反而会绿并写入整条失真的 5 年曲线**（2026-11-13 真实案例，见第九章第 21 条）；日志里先看 `[2/6] 取数成功 N/M 只（x%）`。任何新接口都要照这个模式写。
 2. **分母**：停牌日不计入、每档均线独立分母、上市不足 `MIN_BARS`(51) 根日线者整只剔除、未满 200 根者不进 MA200 分母。改错不会报错，只会让曲线悄悄偏低。
@@ -522,6 +527,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 12. **多源 ≠ 多挂几个源**：2026-11-13 实测三源 `hfq` 绝对价格完全不同（东财 / 新浪 / 腾讯 对 `000001` 分别收 1958.39 / 1816.04 / 2340.22），新浪与腾讯的价格比变异系数最大 34%，**不是简单倍数关系**；但 `close > MA` 判定一致率 99.8% 以上，所以只能「整段同源混用」，不能逐日拼接，也不能凭价格成比例就放行。替代源还比东财晚 1 个交易日，混源时若不裁末端会让最新一日只剩半份样本。开关默认关闭、必须先在海外 runner 上探测通过——完整铁律见第九章第 22 条、SOP 见 12.4-H。
 
 13. **workflow 静默停摆比取数失败更隐蔽**：取数挂了至少有红 run 和日志，YAML 写坏了是「连 run 都不生成」——定时任务像被关掉一样，页面只剩红色横幅。2026-11-14 因重复 `env:` 键停摆 4 天（详见第九章第 23 条）。识别方法：run 名字变成 `.github/workflows/xxx.yml`、或工作日 16:30 / 18:00 之后查不到任何新 run。预防：改完 `.github/workflows/*.yml` 必跑 `python check_workflows.py`；CI 里 `probe-sources.yml` 每周跑一次，失败会让 CI 变红并通知。
+
+14. **依赖范围约束 = 定时炸弹，`exit 139` 不是取数失败**：`numpy<3` 这种写法平时无事，PyPI 一发新版就换掉 CI 的底层 C 库。2026-11-17 只因 numpy 2.5.4→2.5.5，逐股取数并发阶段直接 `Segmentation fault (core dumped)` / `exit code 139`，3 分 43 秒崩溃、没有任何护栏文案、提交步骤 skipped。识别：日志无 `[2/6] 取数成功 N/M 只`，且 `Install dependencies` 的 `Successfully installed` 整行与上次成功 run 只差一个包。修复按第九章第 24 条；`check_workflows.py` 的 `DEPS_PIN_OK` 会把范围约束挡在 CI 之外。**别把它当成限流去反复 `force=true`，也别去动 80% 护栏。**
 
 **可调旋钮表见第八章**，改之前先确认是否同时需要改 `maintenance.yml` 的 `--max-rows`。
 
@@ -548,6 +555,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 3. 计算成功但页面没变：`git diff --cached --quiet` 命中，说明辅助源日期与 CSV 最后日期相同（非交易日 / 已跑过），这是正常幂等。
 4. 红在 `数据新鲜度检查（死信开关）`：这不是计算失败，而是「数据过期」的主动告警——按下面 E 处理。
 5. **run 名字变成 `.github/workflows/xxx.yml`，或工作日 16:30 / 18:00 之后压根查不到新 run**：这不是取数失败，是 workflow YAML 解析失败（多半是同一层级写了两个 `env:` / `jobs:`）。跑 `python check_workflows.py` 定位重复键，按第九章第 23 条合并修复；修完手动 dispatch 一次，确认 run 名字恢复成 `A-share Market Breadth`。
+6. **日志出现 `Segmentation fault` / `exit code 139`**：这是进程级崩溃（依赖 / C 扩展），不是取数护栏失败。别去调 `MIN_FETCH_RATIO`、别反复 `force=true`；按第九章第 24 条对比两次 run 的 `Successfully installed` 版本行，把 `requirements.txt` 锁回已验证的精确版本。v3.14 起 Compute 步骤会自动重试一次，若日志出现 `Compute attempt 2/2` 仍失败才需人工。
 
 **E. 收到「数据过期」通知 / 页面出现红色横幅（新鲜度死信开关触发）**
 1. **先看 `freshness.yml` 最近一次 run 的日志**：脚本会打印 `now(BJ)` / `latest(data)` / `expected >=` / `gap`，直接告诉你数据停在哪天、差几个自然日，不用猜。
@@ -570,7 +578,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
    ```
    确认 `stock_zh_a_hist` 仍返回 `日期 / 收盘 / 成交量` 等列、`hfq` 序列仍连续、`index_zh_a_hist` 三个指数（000300/000001/399006）正常。
 4. **过锚点才准上线**：全量跑一次，比对 **2026-09-21 MA200 ≈ 27.45%**、**2026-11-06 ≈ 12.07%**。偏差 > 0.3 个百分点即视为口径变了 → **回滚，不许上线**。
-5. **通过后**：改 `requirements.txt` 的 pin → 同步第九章第 7 条与版本记录 → 正常 commit（**绝不 force push**）。
+5. **通过后**：改 `requirements.txt` 的 pin → 同步第九章第 7 条与版本记录 → 正常 commit（**绝不 force push**）。**pin 一律写 `pkg==x.y.z` 精确版本**：`pandas` / `numpy` 不许写成 `<3` / `>=`，`python check_workflows.py` 的 `DEPS_PIN_OK` 会拦下范围约束。改完还必须在 CI 上再跑一次 `--limit 200` smoke test 与一次全量重算，两次都通过才算升级完成（v3.14 事故：仅一个 numpy 补丁号变化就足以 segfault）。
 6. **回滚**：`git checkout requirements.txt`（或把 pin 改回旧版本）重新部署即可，`docs/` 数据文件不受影响。
 7. **若升级也救不了**（东财对海外 IP 全面拦截 / akshare 放弃该端点）：换版本无用，得换数据源——实现等价的 `fetch_one()` / `fetch_indices()`（tushare / 新浪 / 腾讯行情均可），但**必须保持 `adjust="hfq"` 后复权、字段语义、`MIN_VALID` 护栏不变**，并过同样的锚点。注意 `codes.txt` 与 `a-stock-api` **只提供代码清单 / 当日快照，不含全量历史日线，不能单独顶替主链路**；实在不行可把 CI 迁到国内 self-hosted runner。**v3.12 已内置等价的新浪 / 腾讯备用源实现，启用流程见 H，不要再另起炉灶改 `fetch_one()`。**
 
@@ -601,8 +609,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 【先读什么】
 1. README 第三章「数据源、单位与剔除项」→ 认清主链路（AKShare 东财逐股后复权日线）
    与辅助链路（a-stock-api Worker 当日快照）。
-2. README 第九章「防 Bug 铁律」23 条 → 全部来自真实踩坑，禁止回退（尤其第 21 条「部分成功必须拒绝覆盖」、第 22 条「多源分层 / 整段同源 / 海外验证前置」、第 23 条「workflow 重复键会让定时静默停摆」）。
-3. README 第十二章 → 12.1 文件职责表、12.3 十二个坑、12.4 八类 SOP（尤其 E「数据过期排查」、F「akshare 升级/接口挂了」、G「llms.txt 缺失/过期/N/A」、H「多源开关启用/关闭」）；改股票池前读 3.5，改图表前读第五章（尤其 5.4 默认显隐），改 AI 文本输出前读第九章第 20 条。
+2. README 第九章「防 Bug 铁律」24 条 → 全部来自真实踩坑，禁止回退（尤其第 21 条「部分成功必须拒绝覆盖」、第 22 条「多源分层 / 整段同源 / 海外验证前置」、第 23 条「workflow 重复键会让定时静默停摆」、第 24 条「依赖精确锁 + 三类失败分开归因」）。
+3. README 第十二章 → 12.1 文件职责表、12.3 十四个坑、12.4 八类 SOP（尤其 E「数据过期排查」、F「akshare 升级/接口挂了」、G「llms.txt 缺失/过期/N/A」、H「多源开关启用/关闭」）；改股票池前读 3.5，改图表前读第五章（尤其 5.4 默认显隐），改 AI 文本输出前读第九章第 20 条。
 4. 要动 Worker 时读 https://github.com/wj624/a-stock-api 的 README。
 
 【硬约束，违反即算错】
@@ -623,8 +631,8 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
   未满 200 根者不进 MA200 分母；幂等跳过前必须检查代码池陈旧度（7 天）。
 - 交易日历用全市场个股日期并集（阈值 30%），不许只依赖指数文件。
 - 红涨绿跌：上涨 #d64545、下跌 #1f9d6b。
-- 依赖锁 akshare==1.20.35 / pandas<3 / numpy<3，升级前必须本地全量验证（流程见 12.4-F：先小样本、再锚点、过了才改 pin，不过就回滚；严禁直接 -U 上线）。
-- 境外 runner 四件套不能删：12 秒 socket 超时、并发 10、重试 2、timeout 90。
+- 依赖必须精确锁 akshare==1.20.35 / pandas==2.3.3 / numpy==2.5.4；严禁 <3 / >= 等范围约束（v3.14 因 numpy 漂到 2.5.5 触发 segfault 139）。升级见 12.4-F：先小样本 + 全量锚点 + CI smoke test，全过才改 pin，不过就回滚；python check_workflows.py 必须输出 DEPS_PIN_OK。
+- 境外 runner 四件套不能删：12 秒 socket 超时、并发 10、重试 2、timeout 150（v3.14 起）。Compute 步骤最多 2 次尝试、间隔 60 秒，两次都失败才让 job 变红，已有 docs/ 不被覆盖。
 - 5 年历史是「当前股票池回算」，有幸存者偏差，不许表述为当时的真实全市场。
 - HTML 用 __XXX__ 唯一占位符整段替换，生成后抽 <script> 跑 node --check。
 - 图例默认关闭的三条曲线必须仍可手动勾选；显隐状态从 getOption().legend[0].selected 读取，
@@ -642,9 +650,14 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
   llms.txt 的「默认 5 年周期 Spread」必须与之一致。
 - 仓库内绝不写任何 PAT；CI 用 GITHUB_TOKEN。
 - 绝不 force push、不重写 main 历史；500MB 清理只裁剪 docs/ 数据。
-- 改 .github/workflows/*.yml 后必须跑 python check_workflows.py；同一层级不准出现两个
+- 改 .github/workflows/*.yml 后必须跑 python check_workflows.py（应同时输出 WORKFLOW_YAML_OK / DEPS_PIN_OK / ALL_CHECKS_OK）；同一层级不准出现两个
   env: / jobs: / on:，加变量一律合并进已有 env 块。run 名字变成文件路径 = YAML 解析失败
   （不是取数失败）；定时任务「没有运行记录」先怀疑 workflow 被改坏，别急着怪数据源。
+- 失败归因先分三类：① 无 run / run 名字是文件路径 = workflow 解析失败（第 23 条）；
+  ② 有护栏文案（仅成功取到 N 只 / 低于成功率护栏下限 / 有效样本仅 N 只）= 取数问题；
+  ③ 出现 Segmentation fault / exit code 139 = 依赖或 C 扩展进程崩溃（第 24 条），
+  对比失败与成功 run 的 Successfully installed 整行锁定漂移包，锁回精确版本。
+  ③ 严禁调低 80% 护栏、严禁反复 force=true、严禁拿它当限流处理。
 - Worker 是辅助链路，失败静默跳过，绝不能接成主数据源。
 
 【改完必须自检】
@@ -658,18 +671,22 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 6. python check_freshness.py  # 应输出 FRESH 且 exit 0（改过页面新鲜度口径后尤其要跑，确保 Python/JS 两套判断一致）。
 7. 确认 docs/llms.txt 存在：首行「最新数据日」== breadth.csv 最后一行 date，
    grep -c 'N/A' docs/llms.txt 为 0，且线上 .../llms.txt 返回 200；改过 write_llms() 必须重新生成。
+8. python check_workflows.py → 必须同时出现 WORKFLOW_YAML_OK / DEPS_PIN_OK / ALL_CHECKS_OK；
+   确认 requirements.txt 三个都是 pkg==x.y.z 精确锁，没有 <3 / >=。
 
 【提交规范】
 commit message 用中文，说明「改了什么 + 为什么」；涉及口径或常量的改动
 必须同步更新 README 第二 / 第八 / 第九章。
 ```
 
-### 12.6 动手前的三行自检
+### 12.6 动手前的自检清单
 
 1. 我要改的是**主计算链路**还是**辅助链路**？越界了吗？
 2. 这次改动会不会让某个「本来有值」的曲线变成空 / 偏低，而退出码照样是 0？
 3. 改完能不能用 2026-09-21 MA200 ≈ 27.45% 这个锚点验证口径没跑偏？
 4. 动过 `.github/workflows/*.yml` 吗？跑了 `python check_workflows.py` 吗？定时任务还在吗？
+5. 动过 `requirements.txt` 吗？三个包还是 `pkg==x.y.z` 精确锁吗？`DEPS_PIN_OK` 吗？
+6. 这次失败是「没 run」「护栏拦下」还是「exit 139 进程崩溃」？三类别混为一谈。
 
 ## 十三、版本记录与实测锚点
 
@@ -695,6 +712,8 @@ commit message 用中文，说明「改了什么 + 为什么」；涉及口径�
 | 2026-11-13 v3.12 | 三层多源冗余 | 事故驱动：11-12 / 11-13 东财 `push2` **与 `push2his`** 同时限流，暴露「备用链路只覆盖代码清单层」的缺口。① 代码清单扩到四级（`stock_zh_a_spot` / `stock_zh_a_spot_tx` 加入，非东财）；② 指数日线三级（新浪 / 腾讯 fallback）；③ 逐股后复权历史按只 fallback（新浪 `stock_zh_a_daily` / 腾讯 `stock_zh_a_hist_tx`），由 `HIST_FALLBACK` 开关控制、**默认关闭**。新增 `trim_to_common_last()` 混源末端裁剪（`FALLBACK_COVER_RATIO=0.80`）、`_clean_pool()` 前缀清洗、`_hist_frame()` 字段标准化、日志按源分组、`probe_sources.py` + `probe-sources.yml` 海外 runner 探测、`llms.txt`「数据口径」行。实测：新浪 vs 腾讯 53365 个 `close>MA` 判定点 MA200 一致率 99.803%；新浪抽 281 只重算 11-11 MA200 15.30% vs 线上 15.35%（SE ±2.15pct）；东财限流下 300 只小样本 fallback 把成功率从 **14%（42/300）拉到 88%（264/300）**、三条指数曲线全部自动切新浪、数据日推进到 11-12。第九章 21→**22 条**、12.3 十一→**十二个坑**、12.4 七→**八类 SOP（新增 H）**、12.5 提示词 / FAQ Q18 / 第八章旋钮同步。`docs/` 未动，开关关闭时主链路行为与 v3.11 等价。**同日追加**：海外 runner 探测连续两次 `OVERSEAS_RUNNER_OK`（新浪逐股 95%→100%、腾讯 100%），据此在 `breadth.yml` 的 Compute 步骤写入 `HIST_FALLBACK: "1"` 启用开关；代码默认值仍为 0，东财正常时全部走主源、口径不变，仅限流时混源。探测脚本另补 `socket.setdefaulttimeout(8)` + 并发 8 + FAIL 不染红 CI（`exit 0` 恒成立）；并发版把探测从 5m12s 压到 3m17s |
 
 | 2026-11-17 v3.13 | workflow 停摆修复 | 事故：11-14 18:25（北京）有 AI 给 4 个 workflow 插 `A_STOCK_API_KEY` 时，在 `breadth.yml` 的 `build` 下新增第二个 `env:`，与原有 `env: TZ` 重复 → GitHub Actions 判 workflow 无效 → 11-14 起 16:30/18:00 定时触发**完全消失**（连失败 run 都没有），数据停在 `2026-11-13` 4 天，仅靠页面红色横幅发现。修复：合并为单个 `env:`（`TZ` + `A_STOCK_API_KEY`），保留 Compute 步骤的 `HIST_FALLBACK=1`；本地/远端 5 个文件同步；dispatch 验证 run 名字恢复为 `A-share Market Breadth`。防护：新增零依赖 `check_workflows.py`（重复键 + `schedule` 缺失检测，挂到 `probe-sources.yml` 每周跑、失败即红并通知）；第九章 22→**23 条**、12.3 十二→**十三个坑**、12.4-D 新增第 5 条、12.5 提示词、12.6 自检同步。注：11-13 三次重算曾成功把数据推进到 11-13，`llms.txt` 记录「东财 46 / 新浪 5,497 只」，证明 v3.12 多源 fallback 在真实全市场下有效 |
+
+| 2026-11-17 v3.14 | 依赖精确锁 + 崩溃自愈 | 承接 v3.13：workflow 修好后手动补跑 run `43986097724` 仍在 Compute 失败，日志为进程级 `Segmentation fault (core dumped)` / `exit code 139`（`[2/6]` 后 3m43s 崩溃、无护栏文案、提交 skipped）。对照 11-13 成功 run `43386707286`：26 个包与 runner 镜像完全一致，**唯一差异 `numpy<3` 自动解析到 2.5.5（成功时 2.5.4）**。修复：① `requirements.txt` 改 `pandas==2.3.3 / numpy==2.5.4` 精确锁；② `check_workflows.py` 新增 `check_pins()`，输出 `DEPS_PIN_OK/FAIL`，与 `WORKFLOW_YAML_OK` 一起汇成 `ALL_CHECKS_OK`；③ `breadth.yml` Compute 步骤加最多 2 次尝试（间隔 60s，两次都失败才红、不覆盖 docs/），`timeout-minutes` 90→150。第九章 23→**24 条**、12.3 十三→**十四个坑**、12.4-D/F、FAQ Q19、12.5 提示词、12.6 自检、第六 / 八 / 十二章同步；云端巡检提示词同步「三类失败归因」与依赖锁硬约束。`docs/` 未手改，由流水线重算推进 |
 
 **交叉验证锚点**（两套完全不同数据源 / 复权方式）：
 
