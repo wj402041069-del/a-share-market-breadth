@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""零外部依赖的 workflow 静态体检。
+
+背景（2026-11-14 真实事故）：给 job 加 `env: A_STOCK_API_KEY` 时，忘了已有
+`env: TZ`，同一 mapping 出现两个同名键。PyYAML 会静默「后者覆盖前者」，
+但 GitHub Actions 直接判 workflow 无效——push 时生成一个名为
+`.github/workflows/breadth.yml` 的失败 run，之后 16:30 / 18:00 的定时触发
+**完全消失且没有任何失败记录**，只能靠页面新鲜度横幅发现。
+
+本脚本检查两件事：
+  ① 同一缩进层级是否出现重复的 mapping 键（重点看 env / jobs / on / steps / name）；
+  ② 四个定时 workflow 是否还保留 `schedule:`（防止误删后定时任务静默消失）。
+
+改完 `.github/workflows/*.yml` 必须本地跑一次；CI 里由 probe-sources.yml 每周跑一次。
+退出码 0 = 健康，1 = 有问题（这里**故意**让 CI 变红，好让 GitHub 立刻通知）。
+"""
+from __future__ import annotations
+
+import glob
+import os
+import re
+import sys
+
+WATCH_KEYS = {
+    "env", "jobs", "on", "permissions", "concurrency", "name", "runs-on",
+    "timeout-minutes", "steps", "strategy", "defaults", "outputs", "with",
+}
+NEEDS_SCHEDULE = {"breadth.yml", "freshness.yml", "maintenance.yml", "probe-sources.yml"}
+KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:(?:\s|$)")
+
+
+def check(path: str) -> list[str]:
+    with open(path, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    problems: list[str] = []
+    level_keys: dict[int, set[str]] = {}
+
+    for i, raw in enumerate(lines, 1):
+        s = raw.strip()
+        if not s or s.startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        if s.startswith("- ") or s == "-":
+            # 每个列表项都是独立 mapping（steps 下每个 step 都有自己的 with/env），
+            # 必须重置当前及更深层的键集合，否则会把不同 step 的同名键误判成重复。
+            for k in [x for x in level_keys if x >= indent]:
+                del level_keys[k]
+            continue
+        m = KEY_RE.match(s)
+        if not m:
+            continue
+        key = m.group(1)
+        if key not in WATCH_KEYS:
+            continue
+        for k in [x for x in level_keys if x > indent]:
+            del level_keys[k]              # 缩进回退 = 退出更深的 mapping
+        keys = level_keys.setdefault(indent, set())
+        if key in keys:
+            problems.append(f"第 {i} 行：重复键 '{key}'（缩进 {indent}），GitHub 会判 workflow 无效")
+        keys.add(key)
+
+    base = os.path.basename(path)
+    if base in NEEDS_SCHEDULE and not any(re.match(r"^\s*schedule:\s*$", l) for l in lines):
+        problems.append(f"缺少 schedule: 定时触发会消失（{base}）")
+    return problems
+
+
+def main() -> int:
+    files = sorted(glob.glob(os.path.join(os.path.dirname(__file__),
+                                         ".github", "workflows", "*.yml")))
+    if not files:
+        print("FAIL 没找到任何 workflow 文件")
+        return 1
+    bad = 0
+    for p in files:
+        issues = check(p)
+        name = os.path.basename(p)
+        if issues:
+            bad += 1
+            print(f"FAIL {name}")
+            for x in issues:
+                print("     -", x)
+        else:
+            print(f"OK   {name}")
+    print("WORKFLOW_YAML_OK" if not bad else f"WORKFLOW_YAML_FAIL ({bad} 个文件有问题)")
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

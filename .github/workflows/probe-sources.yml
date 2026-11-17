@@ -33,5 +33,8 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt
 
+      - name: Lint workflow YAML (duplicate keys / missing schedule)
+        run: python check_workflows.py
+
       - name: Probe non-EastMoney sources on overseas runner
         run: python probe_sources.py
