@@ -94,7 +94,18 @@ MIN_BARS = 51               # 进入计算所需最少日线（MA50 需 50 根 +
 POOL_MAX_AGE_DAYS = 7       # codes.txt 超过该自然日数未刷新就禁止幂等跳过（覆盖春节/国庆长假）
 PCT_WINDOW = 250            # 默认：etf-lsi 归一化分位的滚动窗口（交易日）
 PCT_WINDOW_5Y = MAX_CSV_ROWS  # 可选：图 2 可切换的 5 年全序列滚动窗口（交易日）
-SPREAD_BIG = 25             # |Spread| 达到该值算「大劈叉」
+# --- Spread 三级分档（v3.15，改这里之前先读 README 第五章 5.6 与第十三章 v3.15）---
+# 旧口径只有 SPREAD_BIG=25 一刀切（收敛 / 大劈叉），回测显示阈值应分档：
+#   1300 日回测（指数 rank<30 & |Spread|<T → 未来 120 日，创业板指）：
+#   T=10 → +16.8% / T=15 → +13.7% / T=25 → +12.4% / T=35 → +9.4% / 不过滤 → +3.2%（单调衰减）
+# 因此新增 SPREAD_STRONG=10 作「强收敛」分界，SPREAD_BIG=25 保留为「大劈叉 / 禁买」分界，
+# 两者互不替代：±SPREAD_BIG 仍是右轴虚线（大劈叉视觉基准），±SPREAD_STRONG 是新增内圈细虚线。
+SPREAD_STRONG = 10          # |Spread| < 10 → 强收敛（高胜率档）
+SPREAD_BIG = 25             # |Spread| 达到该值算「大劈叉」（禁用区）
+# 指数百分位分档（百分位 = 近 5 年 percentile rank，不是 rolling min-max 归一化分位）
+IDX_RANK_LOW = 20           # 偏低（最好 <20%）
+IDX_RANK_OK = 30            # 可用上限（<30%）
+IDX_RANK_INVALID = 40       # rank 回升至此线以上 → 本轮「买创业板」规则视为失效
 
 # --- 多源冗余旋钮（v3.12，改这里之前先读 README 第九章第 22 条）--------------
 # 逐股历史 fallback 默认关闭。代码清单层与指数层的备用源是「主源挂了才切」，
@@ -703,6 +714,8 @@ h3{font-size:15px;margin:18px 0 6px;color:#1f2733}
 .ilab{color:var(--muted);font-size:12px}.ival{font-size:26px;font-weight:650;line-height:1.2;margin-top:3px}.ival span{font-size:13px;margin-left:2px}
 .isub{color:var(--muted);font-size:11.5px;margin-top:2px}
 .ibar{height:6px;background:#e9edf3;border-radius:4px;margin-top:9px;overflow:hidden}.ibar i{display:block;height:100%;background:linear-gradient(90deg,#1f9d6b 0%,#e0972f 50%,#d64545 100%)}
+.iwarn{font-size:11.5px;color:#5a6473;margin-top:8px;padding-top:7px;border-top:1px dashed #e3e7ee;line-height:1.65}
+.iwarn b{color:#1f2733}
 .verdict{background:#fff;border:1px solid var(--line);border-left:5px solid #8a93a3;border-radius:10px;padding:14px 18px;margin:14px 0}
 .verdict.v-green{border-left-color:#1f9d6b}.verdict.v-amber{border-left-color:#e0972f}.verdict.v-red{border-left-color:#d64545}.verdict.v-neutral{border-left-color:#8a93a3}
 .vtag{display:inline-block;font-size:13px;font-weight:700;padding:3px 12px;border-radius:20px;margin-bottom:8px}
@@ -751,7 +764,7 @@ __IDXSECT__
 <div class="src">
 主数据源：AKShare → 东方财富 <code>stock_zh_a_spot_em</code>（代码清单主源）→ <code>stock_info_a_code_name</code>（备用源）→ <code>codes.txt</code>（带日期兜底）+ <code>stock_zh_a_hist(adjust="hfq")</code>（逐只后复权日线）+ <code>index_zh_a_hist</code>（沪深300 / 上证综指 / 创业板指）。辅助校验：<code>a-stock-api /api/market-breadth</code> 当日快照（不参与均线计算）。<br>
 数据截止 <b>__LATEST__</b>；成功取数 <b>__NFETCH__</b> 只、计入计算 <b>__NVALID__</b> 只、本次序列 <b>__NDAYS__</b> 个交易日。等权、含北交所/科创创业、ST 未单独剔除。股票池由每日在线清单自动纳入新股、剔除退市股；上市满 __MINBARS__ 根日线进入 MA5/20/50 宽度，满 200 根进入 MA200 宽度；停牌日不计入分母。<br>
-归一化分位参照 <code>wj624/etf-lsi</code>：每个点取自身及之前 N 个交易日的极值做 min-max 映射到 0-100，N 默认 __PCTWIN5Y__（约 5 年全序列滚动，图 2 默认），可切换为 __PCTWINDOW__（250 日滚动）。两种都是「当日及之前」的滚动窗口，不使用未来极值，也不按图表缩放窗口重算；5 年周期看长期历史位置，但近端波动会被压平。Spread = MA200 占比分位 − 基准指数分位（−100 ~ +100），正红负绿、±__SPREADBIG__ 为大劈叉；这是形状对比，不是收益率。头部百分位是「当前 MA200 占比在近 5 年序列中的 percentile rank」，与滚动归一化分位是两个不同指标。<br>
+归一化分位参照 <code>wj624/etf-lsi</code>：每个点取自身及之前 N 个交易日的极值做 min-max 映射到 0-100，N 默认 __PCTWIN5Y__（约 5 年全序列滚动，图 2 默认），可切换为 __PCTWINDOW__（250 日滚动）。两种都是「当日及之前」的滚动窗口，不使用未来极值，也不按图表缩放窗口重算；5 年周期看长期历史位置，但近端波动会被压平。Spread = MA200 占比分位 − 基准指数分位（−100 ~ +100），正红负绿；分三档：｜Spread｜ &lt; __SPREADSTRONG__ 为强收敛（可买）、__SPREADSTRONG__–__SPREADBIG__ 为弱收敛（谨慎小仓）、≥ __SPREADBIG__ 为大劈叉（禁买）；这是形状对比，不是收益率。头部百分位是「当前 MA200 占比在近 5 年序列中的 percentile rank」，与滚动归一化分位是两个不同指标；「指数百分位 &lt;30%」一律指卡片上的 percentile rank，不指归一化分位。<br>
 ⚠️ 5 年历史是用「当前股票池」回算的，早期存在幸存者偏差（当时未上市 / 现已退市的股票不在池内），越往前偏差越大，不可表述为「当时的真实全市场宽度」。<br>
 CSV 滚动保留 __MAXROWS__ 个交易日；docs/ 超过 __MAXMB__ MB 自动裁剪。GitHub Actions 生成于 __GEN__（北京时间）；仅为公开数据统计结果，不构成投资建议。
 </div>
@@ -851,7 +864,12 @@ function spreadSeriesFor(key, spread) {
      lineStyle:{width:1,color:'rgba(107,118,136,0.55)'}, itemStyle:{color:'#6b7688'},
      markLine:{silent:true, symbol:'none', label:{show:false},
        lineStyle:{type:'dashed',width:1,color:'#aab2c0'},
-       data:[{yAxis:DATA.spreadBig},{yAxis:-DATA.spreadBig},{yAxis:0,lineStyle:{color:'#c9ced8',width:1}}]}}
+       data:[
+         {yAxis:DATA.spreadStrong, lineStyle:{type:'dashed',width:1,color:'#b7dcc6'}},
+         {yAxis:-DATA.spreadStrong, lineStyle:{type:'dashed',width:1,color:'#b7dcc6'}},
+         {yAxis:DATA.spreadBig, lineStyle:{type:'dashed',width:1.4,color:'#aab2c0'}},
+         {yAxis:-DATA.spreadBig, lineStyle:{type:'dashed',width:1.4,color:'#aab2c0'}},
+         {yAxis:0,lineStyle:{color:'#c9ced8',width:1}}]}}
   ];
 }
 function rawSeriesFor(key, startPct, endPct) {
@@ -870,7 +888,9 @@ function idxTooltipFor(key) {
     var sp = (curSpreadMap[key] || [])[i];
     if (sp != null) {
       var col = sp >= 0 ? '#E8453C' : '#1FB37A';
-      var tag = Math.abs(sp) >= DATA.spreadBig ? ' · 大劈叉' : '';
+      var sa = Math.abs(sp);
+      var tag = sa < DATA.spreadStrong ? ' · 强收敛（可买档）'
+              : (sa < DATA.spreadBig ? ' · 弱收敛（谨慎、小仓位）' : ' · 大劈叉（禁买）');
       out.push('<span style="color:'+col+'">Spread（vs '+DATA.indexNames[key]+'）：'+(sp>0?'+':'')+sp.toFixed(1)+tag+'</span>');
     }
     return out.join('<br>');
@@ -1057,6 +1077,33 @@ markFreshness();
 </body></html>"""
 
 
+def spread_grade(v):
+    """把 Spread 值映射到三级档位（v3.15）。
+    返回 (code, 简称, 一句说明)。code: strong / weak / split / na。"""
+    if v is None:
+        return ("na", "数据不足", "数据不足，无法判断收敛度")
+    a = abs(float(v))
+    if a < SPREAD_STRONG:
+        return ("strong", "强收敛",
+                f"强收敛（|Spread| < {SPREAD_STRONG}）：宽度与指数同步，结构健康，是最优档")
+    if a < SPREAD_BIG:
+        return ("weak", "弱收敛",
+                f"弱收敛（{SPREAD_STRONG} ≤ |Spread| < {SPREAD_BIG}）：结构尚可但已分化，"
+                "只能小仓位、等进一步收敛")
+    return ("split", "大劈叉",
+            f"大劈叉（|Spread| ≥ {SPREAD_BIG}）：宽度与指数严重背离，禁止新开仓")
+
+
+def _pctl_point(values, q):
+    """给定序列，返回 q 百分点位对应的点位（最近秩法，与 percentile rank 互为反函数）。
+    q=20 表示「历史上 20% 的读数是这个点位或更低」。"""
+    xs = sorted(float(v) for v in (values or []) if v is not None)
+    if not xs:
+        return None
+    k = int(round(q / 100.0 * (len(xs) - 1)))
+    return xs[max(0, min(len(xs) - 1, k))]
+
+
 def build_verdict(b: float, idx: dict) -> tuple:
     """基于 MA200 占比百分位 b 与三大指数百分位 idx，给出综合研判。
     返回 (标签, 等级, 一句话摘要, 详细论证)。等级: green/amber/red/neutral。
@@ -1110,8 +1157,11 @@ def build_verdict(b: float, idx: dict) -> tuple:
     return ("常态参与 · 趋势进行中", "neutral",
             "宽度与指数均处于 5 年中间区间（20%–80%），无极端信号。",
             "市场处于正常运行的趋势 / 震荡中。策略：顺势而为、买回调不追涨；"
-            "真正的「便宜入手」机会要等百分位重新跌回低位，且剪刀差收敛"
-            "（|宽度−指数相对位置| < 25，即无大劈叉）后再分批考虑。")
+            "真正的「便宜入手」机会要等指数百分位（近 5 年 percentile rank）跌回低位"
+            "（<20%，最好 <10%）且 Spread 收敛后再分批考虑："
+            f"|Spread| < {SPREAD_STRONG} 为强收敛（可买），"
+            f"{SPREAD_STRONG}–{SPREAD_BIG} 为弱收敛（谨慎、小仓位），"
+            f"≥ {SPREAD_BIG} 为大劈叉（禁买）。")
 
 
 def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
@@ -1131,6 +1181,10 @@ def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
         "pctWindow": PCT_WINDOW,
         "pctWindow5y": PCT_WINDOW_5Y,
         "spreadBig": SPREAD_BIG,
+        "spreadStrong": SPREAD_STRONG,
+        "idxRankLow": IDX_RANK_LOW,
+        "idxRankOk": IDX_RANK_OK,
+        "idxRankInvalid": IDX_RANK_INVALID,
         "indexNames": res.get("index_names", {}),
         "indexColors": res.get("index_colors", {}),
         "pool": pool,
@@ -1207,27 +1261,65 @@ def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
         if k in idx_stats:
             rk, c, lo, hi, med = idx_stats[k]
             name = res.get("index_names", {}).get(k, k)
+            # —— v3.15 新增：价格预警线（5 年 20% 分位对应点位）与失效线（40% 分位）
+            #    双条件（指数百分位 <20% 且 Spread 收敛）在现实中极易瞬间同时失效，
+            #    因此把「分位」翻译成「点位 + 距当前涨跌幅」，便于提前挂单，而不是等看板变绿。
+            xs = [float(v) for v in (res.get("indices") or {}).get(k, []) if v is not None]
+            p_low = _pctl_point(xs, IDX_RANK_LOW)
+            p_inv = _pctl_point(xs, IDX_RANK_INVALID)
+            warn_bits = []
+            if p_low is not None and c:
+                gap = (p_low / c - 1.0) * 100.0
+                warn_bits.append(
+                    f'预警线（5 年 {IDX_RANK_LOW}% 分位）<b>{p_low:,.0f}</b> 点 · 距当前 '
+                    f'<b>{gap:+.1f}%</b>')
+            if p_inv is not None:
+                warn_bits.append(f'失效线（{IDX_RANK_INVALID}% 分位）<b>{p_inv:,.0f}</b> 点')
+            if rk < IDX_RANK_LOW:
+                warn_bits.append('<b style="color:#1F9D6B">已进入 20% 分位以下（低位区）</b>')
+            elif rk > IDX_RANK_INVALID:
+                warn_bits.append('<b style="color:#8a93a3">百分位已 &gt;40%：本轮低位买入规则失效</b>')
+            warn_html = ('<div class="iwarn">' + '　'.join(warn_bits) + '</div>') if warn_bits else ''
             idx_cards += (
                 '<div class="idxcard"><div class="ilab">' + name + ' · 近 5 年百分位</div>'
                 '<div class="ival">' + f'{rk:.1f}' + '<span>%</span></div>'
                 '<div class="isub">当前 ' + f'{c:,.0f}' + ' · 5 年区间 ' + f'{lo:,.0f}' + '~' + f'{hi:,.0f}' +
                 ' · 中位 ' + f'{med:,.0f}' + '</div>'
-                '<div class="ibar"><i style="width:' + f'{rk:.1f}%' + '"></i></div></div>')
+                '<div class="ibar"><i style="width:' + f'{rk:.1f}%' + '"></i></div>'
+                + warn_html + '</div>')
     idx_card_html = '<div class="idxcards">' + idx_cards + '</div>' if idx_cards else ''
 
     # —— 用法说明框：怎么读 4 个百分位 & 出手规则（纯用法说明，无论证叙事）——
     guide_html = (
-        '<div class="guidebox"><div class="gtitle">怎么读这 4 个百分位 &amp; 出手规则（用法说明）</div>'
+        '<div class="guidebox"><div class="gtitle">怎么读这 4 个百分位 &amp; 出手规则（用法说明，v3.15）</div>'
         '<div class="gbody">'
         '<p><b>4 个百分位（都是近 5 年 percentile rank，0-100）：</b>头部百分位条里的 <b>MA200 占比</b> + 下方三张卡片的 '
         '<b>上证综指 / 沪深300 / 创业板指</b>。数值越低 = 越接近 5 年低位（越便宜 / 超卖）；越高 = 越接近 5 年高位（越贵 / 过热）。'
         '它们各自基于不同序列，彼此不可直接相减。</p>'
-        '<p><b>真正的「宽度 vs 指数」背离</b>看三张背离子图里的 <b>Spread</b> = MA200 占比分位 − 该指数分位：背景 '
-        '<b style="color:#E8453C">红（宽度领先）</b> / <b style="color:#1FB37A">绿（指数领先）</b>，'
-        '|<b>Spread</b>| ≥ 25 为大劈叉；|<b>Spread</b>| &lt; 25 即宽度与指数收敛、结构健康。</p>'
-        '<p><b>出手规则：</b>当某张子图 <b>|Spread| &lt; 25（收敛、无大劈叉）</b> 且 <b>对应指数百分位偏低（&lt;30%，最好 &lt;20%）</b> 时，'
-        '<b>分批</b>考虑入手；若出现「指数领涨、宽度滞后」的绿色大劈叉，是分化反弹，勿追。低位 ≠ 立刻反转，宜分批 + 以「宽度回升 / Spread 收敛」作右侧确认。'
-        '下方「结果判断栏」已按四百分位组合给出综合结论。</p>'
+        f'<p><b>口径写死（不要混用）：</b>本页所有「指数百分位 / rank」= <b>近 5 年 percentile rank</b>'
+        f'（头部与指数卡片里那个数，历史上多少比例的读数低于当前值），<b>不是</b>子图曲线用的 rolling min-max 归一化分位。'
+        f'判断「要不要买」只看 <b>percentile rank</b>：偏低 = rank &lt; {IDX_RANK_LOW}%（最好 &lt;10%），'
+        f'可用上限 = rank &lt; {IDX_RANK_OK}%。子图里的归一化分位只用来画 Spread、看形状，不能当买点判据。</p>'
+        f'<p><b>真正的「宽度 vs 指数」背离</b>看三张背离子图里的 <b>Spread</b> = MA200 占比分位 − 该指数分位：背景 '
+        f'<b style="color:#E8453C">红（宽度领先）</b> / <b style="color:#1FB37A">绿（指数领先）</b>。'
+        f'Spread <b>分三档</b>（旧版只有 ±{SPREAD_BIG} 一刀切，已升级）：'
+        f'<b style="color:#1F9D6B">|Spread| &lt; {SPREAD_STRONG} = 强收敛（可买）</b> · '
+        f'<b style="color:#C98212">{SPREAD_STRONG} ~ {SPREAD_BIG} = 弱收敛（谨慎、小仓位）</b> · '
+        f'<b style="color:#B23B3B">|Spread| ≥ {SPREAD_BIG} = 大劈叉（禁买）</b>。'
+        f'子图上 ±{SPREAD_STRONG} 细虚线、±{SPREAD_BIG} 粗虚线即这三档的分界。</p>'
+        f'<p><b>出手规则（双条件，缺一不可）：</b>某张子图 <b>{spread_grade(0)[1]}档</b>（|Spread| &lt; {SPREAD_STRONG}）'
+        f'<b>且</b> 该指数 <b>percentile rank &lt; {IDX_RANK_OK}%（最好 &lt; {IDX_RANK_LOW}%）</b> → 分批入手；'
+        f'处于弱收敛档（{SPREAD_STRONG}–{SPREAD_BIG}）时只允许小仓位试探，并等进一步收敛；'
+        f'大劈叉（≥{SPREAD_BIG}，尤其绿色「指数领涨、宽度滞后」）是分化反弹，勿追。'
+        f'<b>仓位上限</b>：单一信号不超过总仓位 1/3–1/2，不一次性满仓（历史上入场后 120 日最大浮亏中位数约 −16.5%，'
+        f'浮亏 &lt;5% 的情形仅约 11%，即规则偏早而非偏晚，必须留补仓空间）。</p>'
+        f'<p><b>价格预警线（新增）：</b>三张指数卡片底部直接给出「5 年 {IDX_RANK_LOW}% 分位对应点位 + 距当前涨跌幅」，'
+        f'这是把分位翻译成点位，便于提前挂单、而不是等看板变绿才追。'
+        f'同步给出「{IDX_RANK_INVALID}% 分位失效线」：指数 rank 回升到 {IDX_RANK_INVALID}% 以上，'
+        f'说明本轮「等低位买入」的规则已失效（反弹已走完，双条件同时不成立），应承认错过、不追高。</p>'
+        f'<p><b>为什么改成三档：</b>2021-07 至 2026-11 共 1300 个交易日回测（指数 rank&lt;30 &amp; |Spread|&lt;T → 未来 120 日，'
+        f'创业板指）显示收益随 T 单调衰减：T=10 +16.8% / 15 +13.7% / 25 +12.4% / 35 +9.4% / 不过滤 +3.2%，'
+        f'故 {SPREAD_BIG} 不是拐点而是宽松边界，内圈需再切一档 {SPREAD_STRONG}。</p>'
         '</div></div>')
 
     # —— 综合研判（结果栏目）——
@@ -1246,7 +1338,9 @@ def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
             ' · ' + names.get("sse", "上证综指") + ' <b>' + f'{idx_rank.get("sse", 0):.1f}%' + '</b>'
             ' · ' + names.get("hs300", "沪深300") + ' <b>' + f'{idx_rank.get("hs300", 0):.1f}%' + '</b>'
             ' · ' + names.get("cyb", "创业板指") + ' <b>' + f'{idx_rank.get("cyb", 0):.1f}%' + '</b>'
-            ' · 宽度−指数相对位置差 <b>' + f'{spread_repr:+.1f}' + '</b>（|&lt;25| 视为收敛）</div>'
+            ' · 宽度−指数相对位置差 <b>' + f'{spread_repr:+.1f}' + '</b>（'
+            '档位：<b>' + spread_grade(spread_repr)[1] + '</b>；'
+            f'|·| &lt; {SPREAD_STRONG} 强收敛 / {SPREAD_STRONG}–{SPREAD_BIG} 弱收敛 / ≥ {SPREAD_BIG} 大劈叉）</div>'
             '</div>')
 
     # —— 归一化背离对比：拆成 3 张独立子图（每张预绑定一个指数作背离基准）——
@@ -1262,16 +1356,19 @@ def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
         '<p class="spread-note"><b id="pctWinDesc">滚动 __PCTWIN5Y__ 个交易日（约 5 年）</b> min-max 归一化到 0-100'
         '（只用当日及之前数据，口径不随图表缩放漂移；可切换周期）。每张子图背景 Spread = MA200 占比分位 − 该指数 占比分位：'
         '<b style="color:#E8453C">正值红（宽度领先）</b> / <b style="color:#1FB37A">负值绿（指数领先）</b>，'
-        '|Spread| ≥ __SPREADBIG__ 为大劈叉。悬停查看每日明细。</p>')
+        '分三档：|Spread| &lt; __SPREADSTRONG__ 强收敛（可买） / __SPREADSTRONG__–__SPREADBIG__ 弱收敛（谨慎小仓） / '
+        '≥ __SPREADBIG__ 大劈叉（禁买）。悬停查看每日明细。</p>')
     for k in ("sse", "hs300", "cyb"):
         if k in (res.get("indices") or {}):
             name = res.get("index_names", {}).get(k, k)
             idx_sect_html += (
                 '<div class="idxwrap">'
                 '<h3>' + name + ' 与 MA200 占比 · 归一化背离对比</h3>'
-                '<p class="guid">指导：当本图 <b>|Spread|&lt;25（无大劈叉、宽度与指数收敛）</b> 且 '
-                '<b>指数百分位偏低（&lt;30%，最好&lt;20%）</b> 时，分批考虑入手；'
-                '若出现「指数领涨宽度」的绿色大劈叉，则是分化反弹，勿追。</p>'
+                f'<p class="guid">指导：本图 <b>|Spread| &lt; {SPREAD_STRONG}（强收敛）</b> 且 '
+                f'<b>该指数 percentile rank 偏低（&lt;{IDX_RANK_OK}%，最好 &lt;{IDX_RANK_LOW}%）</b> → 分批考虑入手；'
+                f'|Spread| 在 {SPREAD_STRONG}–{SPREAD_BIG} 之间（弱收敛）→ 只小仓位试探；'
+                f'|Spread| ≥ {SPREAD_BIG}（大劈叉），尤其绿色「指数领涨、宽度滞后」→ 分化反弹，勿追。'
+                f'注意这里曲线是归一化分位、Spread 由归一化分位算；「指数百分位」判据用上方卡片的 percentile rank，两者不混用。</p>'
                 '<div class="panel"><div id="idx_' + k + '"></div></div>'
                 '</div>')
 
@@ -1293,6 +1390,7 @@ def write_html(res: dict, aux: dict | None, pool: dict, path: str) -> None:
             .replace("__PCTWINDOW__", str(PCT_WINDOW))
             .replace("__PCTWIN5Y__", str(PCT_WINDOW_5Y))
             .replace("__SPREADBIG__", str(SPREAD_BIG))
+            .replace("__SPREADSTRONG__", str(SPREAD_STRONG))
             .replace("__MAXROWS__", str(MAX_CSV_ROWS))
             .replace("__MAXMB__", str(int(MAX_DIR_MB)))
             .replace("__GEN__", res["generated_at"])
@@ -1395,7 +1493,10 @@ def write_llms(res: dict, path: str) -> None:
       "三张背离子图里的曲线是 **rolling min-max 归一化分位**（当日及之前窗口内映射到 0-100）。"
       "两者数值可能差很远，都正常。")
     A(f"4. **Spread 的刻度是 −100 ~ +100**：Spread = MA200 占比归一化分位 − 该指数归一化分位。"
-      f"**abs(Spread) ≥ {SPREAD_BIG} 才是大劈叉**；正值（红色）= 宽度领先，负值（绿色）= 指数领先。"
+      f"**分三档**：abs(Spread) < {SPREAD_STRONG} = 强收敛（结构健康，可买档）；"
+      f"{SPREAD_STRONG} ~ {SPREAD_BIG} = 弱收敛（分化中，只能小仓试探）；"
+      f"abs(Spread) ≥ {SPREAD_BIG} = 大劈叉（禁买）。"
+      "正值（红色）= 宽度领先，负值（绿色）= 指数领先。"
       "**A 股红涨绿跌，不要反色**，也不要把 40~60 当成「正常区间」——那已是宽度大幅领先的极端值。")
     A("5. **4 个百分位各自基于不同序列，彼此不可直接相减**；要判断「宽度 vs 指数」背离，"
       "只能用同一张背离子图里的 Spread。")
@@ -1408,9 +1509,16 @@ def write_llms(res: dict, path: str) -> None:
     A("")
     A("- **4 个百分位（近 5 年 percentile rank，0-100）**：MA200 占比 + 上证综指 / 沪深300 / 创业板指。"
       "数值越低 = 越接近 5 年低位（越便宜 / 超卖）；越高 = 越接近 5 年高位（越贵 / 过热）。")
-    A(f"- **出手规则**：当某张背离子图 **abs(Spread) < {SPREAD_BIG}（宽度与指数收敛、无大劈叉）** "
-      "且 **对应指数百分位偏低（<30%，最好 <20%）** 时，可**分批**考虑入手；"
+    A(f"- **出手规则（双条件，缺一不可）**：某张背离子图 **abs(Spread) < {SPREAD_STRONG}（强收敛）** "
+      f"且 **对应指数 percentile rank < {IDX_RANK_OK}%（最好 < {IDX_RANK_LOW}%）** 时，可**分批**考虑入手；"
+      f"处于弱收敛档（abs(Spread) {SPREAD_STRONG}–{SPREAD_BIG}）时只允许小仓位试探；"
       "若出现「指数领涨、宽度滞后」的绿色大劈叉，是分化反弹，勿追。")
+    A(f"- **「指数百分位」口径写死**：只指卡片 / 上表的 **percentile rank（近 5 年）**，"
+      f"**不是**子图里的归一化分位；两者同日可能给出相反结论，混用会误判。")
+    A("- **仓位纪律**：单一信号不超过总仓位 1/3–1/2，不一次性满仓。历史回测显示入场后"
+      "120 日最大浮亏中位数约 −16.5%、浮亏 <5% 的仅约 11%，说明规则偏早而非偏晚，必须留补仓空间。")
+    A(f"- **失效边界**：指数 rank 回升到 {IDX_RANK_INVALID}% 以上时，本轮「等低位买入」规则失效"
+      "（低位机会已走完），应承认错过、不追高；下方「低位阈值对应点位」给出了对应点位。")
     A("- **低位 ≠ 立刻反转**：宜分批，并以「宽度回升 / Spread 收敛」作右侧确认。")
     A("- 页面「结果判断栏」已按四百分位组合给出 红/橙/绿/中性 综合结论，可直接引用。")
     A("")
@@ -1456,6 +1564,27 @@ def write_llms(res: dict, path: str) -> None:
         elif k in indices:
             A(f"| {nm} | N/A | N/A | N/A | N/A |")
     A("")
+    A(f"### 低位阈值对应点位（把「percentile rank < {IDX_RANK_LOW}%」翻译成价格，v3.15 新增）")
+    A("")
+    A("| 指数 | 当前点位 | 预警线（5 年 " + str(IDX_RANK_LOW) + "% 分位） | 距当前 | 失效线（"
+      + str(IDX_RANK_INVALID) + "% 分位） |")
+    A("|---|---|---|---|---|")
+    for k in ("sse", "hs300", "cyb"):
+        if k not in indices:
+            continue
+        nm = names.get(k, k)
+        seq = [float(v) for v in indices[k] if v is not None]
+        cur = seq[-1] if seq else None
+        p_lo = _pctl_point(seq, IDX_RANK_LOW)
+        p_inv = _pctl_point(seq, IDX_RANK_INVALID)
+        gap = f"{(p_lo / cur - 1) * 100:+.1f}%" if (p_lo and cur) else "N/A"
+        A(f"| {nm} | {_fmt(cur)} 点 | {_fmt(p_lo)} 点 | {gap} | {_fmt(p_inv)} 点 |")
+    A("")
+    A("- 预警线 = 近 5 年 20% 分位对应的点位（随窗口滚动缓慢变化，**不是写死的常数**）；"
+      "距当前为负 = 还要再跌多少才进入低位区。")
+    A(f"- 失效线 = {IDX_RANK_INVALID}% 分位点位：指数 rank 升破它，本轮「等低位」的机会窗口已关闭，"
+      "不要再按低位规则买，也不要追高。")
+    A("")
     A("### 宽度 vs 指数背离（Spread = MA200 占比分位 − 指数分位，−100 ~ +100）")
     A("")
     A("| 指数 | 默认 5 年周期 Spread | 250 日周期 Spread | 判定 |")
@@ -1470,10 +1599,14 @@ def write_llms(res: dict, path: str) -> None:
         s250 = p250 - v250 if p250 is not None and v250 is not None else None
         if s5 is None:
             verdict = "数据不足"
-        elif abs(s5) >= SPREAD_BIG:
-            verdict = "大劈叉 · " + ("宽度领先（红）" if s5 > 0 else "指数领先（绿）")
         else:
-            verdict = "收敛（结构健康）"
+            g_code, g_short, _g_note = spread_grade(s5)
+            if g_code == "strong":
+                verdict = "强收敛（结构健康，可买档）"
+            elif g_code == "weak":
+                verdict = "弱收敛（已分化，只能小仓试探）"
+            else:
+                verdict = "大劈叉（禁买）· " + ("宽度领先（红）" if s5 > 0 else "指数领先（绿）")
         A(f"| {nm} | {_fmt(s5, 2)} | {_fmt(s250, 2)} | {verdict} |")
     A("")
     A("### 涨跌家数与动量")
@@ -1534,8 +1667,9 @@ def write_llms(res: dict, path: str) -> None:
     A("- **宽度领先（Spread 正且大劈叉）**：个股普涨先于指数回暖，是底部常见的领先信号；"
       "配合「宽度已脱离低位 + 指数仍在 5 年低位」更可靠。")
     A("- **指数领先（Spread 负且大劈叉）**：少数权重撑指数、个股普跌，属分化反弹，勿追。")
-    A(f"- **可考虑入手的组合**：某张子图 abs(Spread) < {SPREAD_BIG}（收敛）"
-      "且对应指数百分位 <30%（最好 <20%），分批 + 右侧确认。")
+    A(f"- **可考虑入手的组合**：某张子图 abs(Spread) < {SPREAD_STRONG}（强收敛）"
+      f"且对应指数 percentile rank < {IDX_RANK_OK}%（最好 < {IDX_RANK_LOW}%），分批 + 右侧确认；"
+      f"弱收敛档（{SPREAD_STRONG}–{SPREAD_BIG}）只小仓试探，大劈叉一律不动。")
     A("- **过热组合**：MA200 占比百分位 >80% 且指数同步高位，赔率下降，注意宽度是否率先见顶。")
     A("")
     A("## 名词速查")
@@ -1548,7 +1682,11 @@ def write_llms(res: dict, path: str) -> None:
     A("| percentile rank | 当前值在历史样本中的排名位置；20% 表示历史上仅 20% 的读数更低 |")
     A("| rolling min-max 分位 | 当日及之前 N 日窗口内把序列映射到 0-100；只用当日及之前数据，无前视偏差 |")
     A("| Spread（剪刀差） | MA200 占比归一化分位 − 指数归一化分位，范围 −100 ~ +100 |")
-    A(f"| 大劈叉 | abs(Spread) ≥ {SPREAD_BIG}，宽度与指数严重背离 |")
+    A(f"| 大劈叉 | abs(Spread) ≥ {SPREAD_BIG}，宽度与指数严重背离，禁买 |")
+    A(f"| 弱收敛 | {SPREAD_STRONG} ≤ abs(Spread) < {SPREAD_BIG}，宽度与指数已明显分化，只小仓试探 |")
+    A(f"| 强收敛 | abs(Spread) < {SPREAD_STRONG}，宽度与指数同步，结构健康（可买档） |")
+    A(f"| 预警线 | 指数近 5 年 {IDX_RANK_LOW}% 分位对应的点位，跌到它才算「rank 进入低位区」 |")
+    A(f"| 失效线 | 指数近 5 年 {IDX_RANK_INVALID}% 分位对应的点位，rank 升破它则低位规则失效 |")
     A("| EMA | 指数移动平均 |")
     A("| McClellan 振荡器 | EMA19(上涨−下跌) − EMA39(上涨−下跌)，广度动量 |")
     A("| 幸存者偏差 | 用当前仍上市的股票池回算早期历史，已退市个股不在样本内 |")
