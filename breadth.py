@@ -5,17 +5,17 @@ A 股市场宽度（TradingView INDEX:S5TH 同类）—— 云端版，完全脱
 
 主数据源（算均线宽度必须用逐股历史 + 复权，快照类 API 无法替代）:
   AKShare -> 东方财富
-    stock_zh_a_hist(adjust="hfq")       逐只后复权日线主源（push2his；后复权序列连续，无需 gbbq）
+    stock_zh_a_hist_em(adjust="hfq")    逐只后复权日线主源（push2his；后复权序列连续，无需 gbbq）
     stock_zh_a_spot_em()                全市场代码清单主源（push2，境外偶发 WAF / 限流）
-    index_zh_a_hist()                   沪深300 / 上证综指 / 创业板指日线主源
+    index_zh_hist_em()                  沪深300 / 上证综指 / 创业板指日线主源
 
 多源冗余（v3.12，主源失败才触发；详见 README 第九章第 22 条）:
   ① 代码清单（始终启用，低风险）
-      stock_info_a_code_name()  → stock_zh_a_spot() → stock_zh_a_spot_tx() → codes.txt
+      stock_info_a_code_name()  → stock_zh_a_spot_sina() → stock_zh_a_spot_tx() → codes.txt
   ② 指数日线（始终启用，中低风险）
-      stock_zh_index_daily()    → stock_zh_index_daily_tx()
+      index_zh_daily_sina()     → index_zh_daily_tx()
   ③ 逐股后复权历史（受 HIST_FALLBACK 开关控制，默认关闭！）
-      stock_zh_a_daily(hfq)     → stock_zh_a_hist_tx(hfq)
+      stock_zh_a_hist_sina(hfq) → stock_zh_a_hist_tx(hfq)
       开启前必须先在 GitHub Actions 海外 runner 上跑 probe-sources.yml 验证可达性。
       每只股票整段历史只用一个源，禁止逐日拼接；混源时末端按共同覆盖率裁剪。
       ⚠ 替代源通常比东财晚 1 个交易日，且北交所部分新股历史不足会被 MA200 过滤。
@@ -232,8 +232,8 @@ POOL_SOURCES = [
      lambda: ak.stock_zh_a_spot_em()["代码"]),
     ("备用源 stock_info_a_code_name", "backup", POOL_MIN_COUNT,
      lambda: ak.stock_info_a_code_name()["code"]),
-    ("备用源 新浪 stock_zh_a_spot", "backup:sina", POOL_MIN_COUNT,
-     lambda: ak.stock_zh_a_spot()["代码"]),
+    ("备用源 新浪 stock_zh_a_spot_sina", "backup:sina", POOL_MIN_COUNT,
+     lambda: ak.stock_zh_a_spot_sina()["代码"]),
     ("备用源 腾讯 stock_zh_a_spot_tx", "backup:tx", POOL_MIN_COUNT,
      lambda: ak.stock_zh_a_spot_tx()["code"]),
 ]
@@ -305,18 +305,18 @@ def _index_map(df, date_col: str, close_col: str, min_rows: int = 200) -> dict:
 
 
 def fetch_indices(start: str, end: str) -> dict:
-    """三级链路：东财 index_zh_a_hist → 新浪 stock_zh_index_daily → 腾讯 stock_zh_index_daily_tx。
+    """三级链路：东财 index_zh_hist_em → 新浪 index_zh_daily_sina → 腾讯 index_zh_daily_tx。
     主源成功时行为与旧版一致；只有主源挂了才切非东财源（实测点位一致，见 README 12.4-H）。"""
     out: dict = {}
     for key, (sym, name, _) in INDEXES.items():
         fsym = INDEX_FALLBACK_SYMBOLS.get(key, "sh" + sym)
         chain = [
             ("东财", lambda: _index_map(
-                ak.index_zh_a_hist(symbol=sym, period="daily", start_date=start, end_date=end),
+                ak.index_zh_hist_em(symbol=sym, period="daily", start_date=start, end_date=end),
                 "日期", "收盘")),
-            ("新浪", lambda: _index_map(ak.stock_zh_index_daily(symbol=fsym), "date", "close")),
+            ("新浪", lambda: _index_map(ak.index_zh_daily_sina(symbol=fsym), "date", "close")),
             ("腾讯", lambda: _index_map(
-                ak.stock_zh_index_daily_tx(symbol=fsym, start_date=start, end_date=end),
+                ak.index_zh_daily_tx(symbol=fsym, start_date=start, end_date=end),
                 "date", "close")),
         ]
         for label, fn in chain:
@@ -376,8 +376,9 @@ def _fetch_fallback(code: str, start: str, end: str):
     """整段同源：主源失败后，这只股票的全部历史只用一个备用源，绝不逐日拼接。"""
     sym = _prefixed(code)
     sources = (
-        ("sina", lambda: ak.stock_zh_a_daily(symbol=sym, start_date=start,
-                                             end_date=end, adjust="hfq")),
+        ("sina", lambda: ak.stock_zh_a_hist_sina(symbol=sym, period="daily",
+                                                 start_date=start, end_date=end,
+                                                 adjust="hfq")),
         ("tx", lambda: ak.stock_zh_a_hist_tx(symbol=sym, start_date=start,
                                              end_date=end, adjust="hfq")),
     )
@@ -397,8 +398,8 @@ def fetch_one(code: str, start: str, end: str, use_fallback: bool = False):
     # 主源：与 v3.11 逐字一致，保证 HIST_FALLBACK 关闭时行为完全等价
     for attempt in range(RETRY):
         try:
-            df = ak.stock_zh_a_hist(symbol=code, period="daily",
-                                    start_date=start, end_date=end, adjust="hfq")
+            df = ak.stock_zh_a_hist_em(symbol=code, period="daily",
+                                       start_date=start, end_date=end, adjust="hfq")
             if df is None or len(df) < MIN_BARS or "收盘" not in df.columns:
                 break
             # 只留两列：5 年窗口下 5900 只全字段会吃掉近 1 GB 内存
@@ -762,7 +763,7 @@ __IDXSECT__
 <h2>最近 15 个交易日</h2>
 <table><thead><tr><th>日期</th><th>样本数</th><th>&gt;MA5</th><th>&gt;MA20</th><th>&gt;MA50</th><th>&gt;MA200</th><th>上涨</th><th>下跌</th></tr></thead><tbody>__TRS__</tbody></table>
 <div class="src">
-主数据源：AKShare → 东方财富 <code>stock_zh_a_spot_em</code>（代码清单主源）→ <code>stock_info_a_code_name</code>（备用源）→ <code>codes.txt</code>（带日期兜底）+ <code>stock_zh_a_hist(adjust="hfq")</code>（逐只后复权日线）+ <code>index_zh_a_hist</code>（沪深300 / 上证综指 / 创业板指）。辅助校验：<code>a-stock-api /api/market-breadth</code> 当日快照（不参与均线计算）。<br>
+主数据源：AKShare → 东方财富 <code>stock_zh_a_spot_em</code>（代码清单主源）→ <code>stock_info_a_code_name</code>（备用源）→ <code>codes.txt</code>（带日期兜底）+ <code>stock_zh_a_hist_em(adjust="hfq")</code>（逐只后复权日线）+ <code>index_zh_hist_em</code>（沪深300 / 上证综指 / 创业板指）。辅助校验：<code>a-stock-api /api/market-breadth</code> 当日快照（不参与均线计算）。<br>
 数据截止 <b>__LATEST__</b>；成功取数 <b>__NFETCH__</b> 只、计入计算 <b>__NVALID__</b> 只、本次序列 <b>__NDAYS__</b> 个交易日。等权、含北交所/科创创业、ST 未单独剔除。股票池由每日在线清单自动纳入新股、剔除退市股；上市满 __MINBARS__ 根日线进入 MA5/20/50 宽度，满 200 根进入 MA200 宽度；停牌日不计入分母。<br>
 归一化分位参照 <code>wj624/etf-lsi</code>：每个点取自身及之前 N 个交易日的极值做 min-max 映射到 0-100，N 默认 __PCTWIN5Y__（约 5 年全序列滚动，图 2 默认），可切换为 __PCTWINDOW__（250 日滚动）。两种都是「当日及之前」的滚动窗口，不使用未来极值，也不按图表缩放窗口重算；5 年周期看长期历史位置，但近端波动会被压平。Spread = MA200 占比分位 − 基准指数分位（−100 ~ +100），正红负绿；分三档：｜Spread｜ &lt; __SPREADSTRONG__ 为强收敛（可买）、__SPREADSTRONG__–__SPREADBIG__ 为弱收敛（谨慎小仓）、≥ __SPREADBIG__ 为大劈叉（禁买）；这是形状对比，不是收益率。头部百分位是「当前 MA200 占比在近 5 年序列中的 percentile rank」，与滚动归一化分位是两个不同指标；「指数百分位 &lt;30%」一律指卡片上的 percentile rank，不指归一化分位。<br>
 ⚠️ 5 年历史是用「当前股票池」回算的，早期存在幸存者偏差（当时未上市 / 现已退市的股票不在池内），越往前偏差越大，不可表述为「当时的真实全市场宽度」。<br>
@@ -1648,7 +1649,7 @@ def write_llms(res: dict, path: str) -> None:
     A("")
     A("## 数据口径与已知限制")
     A("")
-    A(f"- **后复权**：`stock_zh_a_hist(adjust=\"hfq\")`，除权日不会假跌破；严禁用不复权价。")
+    A(f"- **后复权**：`stock_zh_a_hist_em(adjust=\"hfq\")`，除权日不会假跌破；严禁用不复权价。")
     A("- **等权**：一只股票一票，不看市值。指数涨但宽度掉头，通常说明少数权重在撑，属脆弱结构。")
     A("- **停牌日不计入当日分母**，且每档均线独立分母；把无值算成「未站上」会让曲线系统性偏低。")
     A(f"- **上市满 {MIN_BARS} 根日线**才进入 MA5/20/50 宽度，满 200 根才进 MA200 分母。")

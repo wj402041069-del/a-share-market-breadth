@@ -115,17 +115,17 @@
 |---|---|---|---|
 | 代码清单 ① 主源 | `ak.stock_zh_a_spot_em()` | 东财 `push2` | ✅ 自动切 ② |
 | 代码清单 ② 备用 | `ak.stock_info_a_code_name()` | 非东财 | ✅ 自动切 ③ |
-| 代码清单 ③ 备用 | `ak.stock_zh_a_spot()` | 新浪 | ✅ 自动切 ④ |
+| 代码清单 ③ 备用 | `ak.stock_zh_a_spot_sina()` | 新浪 | ✅ 自动切 ④ |
 | 代码清单 ④ 备用 | `ak.stock_zh_a_spot_tx()` | 腾讯 | ✅ 回退 `codes.txt` |
-| **逐股后复权日线 主源** | `ak.stock_zh_a_hist(adjust="hfq")` | 东财 `push2his` | ⚠️ 开关关闭时 ❌ 主计算唯一依赖 |
-| **逐股后复权日线 备用** | `ak.stock_zh_a_daily(hfq)` / `ak.stock_zh_a_hist_tx(hfq)` | 新浪 / 腾讯 | 仅 `HIST_FALLBACK=1` 时启用 |
-| 三大指数 主源 | `ak.index_zh_a_hist()` | 东财 | ✅ 自动切新浪 / 腾讯 |
-| 三大指数 备用 | `ak.stock_zh_index_daily()` / `ak.stock_zh_index_daily_tx()` | 新浪 / 腾讯 | ✅ 三级全挂才留空 |
+| **逐股后复权日线 主源** | `ak.stock_zh_a_hist_em(adjust="hfq")` | 东财 `push2his` | ⚠️ 开关关闭时 ❌ 主计算唯一依赖 |
+| **逐股后复权日线 备用** | `ak.stock_zh_a_hist_sina(hfq)` / `ak.stock_zh_a_hist_tx(hfq)` | 新浪 / 腾讯 | 仅 `HIST_FALLBACK=1` 时启用 |
+| 三大指数 主源 | `ak.index_zh_hist_em()` | 东财 | ✅ 自动切新浪 / 腾讯 |
+| 三大指数 备用 | `ak.index_zh_daily_sina()` / `ak.index_zh_daily_tx()` | 新浪 / 腾讯 | ✅ 三级全挂才留空 |
 | 当日快照校验 / 幂等 | `a-stock-api /api/market-breadth` | Cloudflare Worker | ✅ 静默跳过 |
 
 > **v3.12 分层结论**（2026-11-13 实测）：11-12 / 11-13 停更卡住的是**逐股后复权历史层**，不是「信号源少」。
 > 代码清单源与辅助 Worker **都不能替代**逐股历史；`stock_info_a_code_name` 成功、单只
-> `stock_zh_a_hist(000001)` 成功，只说明东财限流是分接口 / 分 IP / 概率性的。详见 3.2 / 12.4-H。
+> `stock_zh_a_hist_em(000001)` 成功，只说明东财限流是分接口 / 分 IP / 概率性的。详见 3.2 / 12.4-H。
 
 ### 3.1 `wj624/a-stock-api` 评估结论：**不是更好，不能当主源**
 
@@ -149,7 +149,7 @@
 |---|---|---|---|
 | ① 主源 | `stock_zh_a_spot_em()` | 5927 行 / 约 76 秒 | 完整快照，含新股与退市整理股；下限 3000 只 |
 | ② 备用 | `stock_info_a_code_name()` | 5579 行 / 约 8.5 秒 | 走**不同端点**，纯在市清单；下限 `POOL_MIN_COUNT=5000` |
-| ③ 备用 | `stock_zh_a_spot()` | 5578 行 / 约 6.5 秒 | 新浪现货，代码带 `sh/sz/bj` 前缀，`_clean_pool()` 负责剥掉 |
+| ③ 备用 | `stock_zh_a_spot_sina()` | 5578 行 / 约 6.5 秒 | 新浪现货，代码带 `sh/sz/bj` 前缀，`_clean_pool()` 负责剥掉 |
 | ④ 备用 | `stock_zh_a_spot_tx()` | 5578 行 / 约 6.6 秒 | 腾讯现货，同上；与 ③ 不同端点、不同公司 |
 | ⑤ 兜底 | `codes.txt` | 本地文件 | ①~④ 全挂才启用，**不刷新日期**，让陈旧度可见 |
 
@@ -162,9 +162,9 @@
 ...
 ```
 
-**② 指数日线层（三级，始终启用）**：`index_zh_a_hist` → `stock_zh_index_daily`（新浪）→ `stock_zh_index_daily_tx`（腾讯）。2026-11-13 东财限流时实测三条曲线全部自动切到新浪（沪深300 6029 / 上证 8762 / 创业板 3994 根日线），新浪与腾讯点位一致（沪深300 收 4043.925 vs 4043.93）。
+**② 指数日线层（三级，始终启用）**：`index_zh_hist_em` → `index_zh_daily_sina`（新浪）→ `index_zh_daily_tx`（腾讯）。2026-11-13 东财限流时实测三条曲线全部自动切到新浪（沪深300 6029 / 上证 8762 / 创业板 3994 根日线），新浪与腾讯点位一致（沪深300 收 4043.925 vs 4043.93）。
 
-**③ 逐股后复权历史层（受 `HIST_FALLBACK` 开关控制，默认关闭）**：这才是 11-12 / 11-13 停更的真正瓶颈。旧版这里曾写「逐股历史走 `push2his`，不受这条 WAF 限制，主源挂掉不会拖垮整个计算」——**已被 11-12 事故证伪**：`push2his` 同样会被限流，且当时没有任何兜底。备用源为新浪 `stock_zh_a_daily(hfq)` 与腾讯 `stock_zh_a_hist_tx(hfq)`，实测 30/30 可用、覆盖 1788 根日线（2019-07-01 起，足够 2400 自然日回算），但**最晚只到 11-12，比东财慢 1 个交易日**。完整口径验证与启用流程见 12.4-H / 第九章第 22 条。**CI 已于 2026-11-13 在两次海外探测通过后启用该开关（`breadth.yml` env `HIST_FALLBACK=1`）**；代码默认值仍为 0，本地运行不受影响。
+**③ 逐股后复权历史层（受 `HIST_FALLBACK` 开关控制，默认关闭）**：这才是 11-12 / 11-13 停更的真正瓶颈。旧版这里曾写「逐股历史走 `push2his`，不受这条 WAF 限制，主源挂掉不会拖垮整个计算」——**已被 11-12 事故证伪**：`push2his` 同样会被限流，且当时没有任何兜底。备用源为新浪 `stock_zh_a_hist_sina(hfq)` 与腾讯 `stock_zh_a_hist_tx(hfq)`，实测 30/30 可用、覆盖 1788 根日线（2019-07-01 起，足够 2400 自然日回算），但**最晚只到 11-12，比东财慢 1 个交易日**。完整口径验证与启用流程见 12.4-H / 第九章第 22 条。**CI 已于 2026-11-13 在两次海外探测通过后启用该开关（`breadth.yml` env `HIST_FALLBACK=1`）**；代码默认值仍为 0，本地运行不受影响。
 
 ### 3.3 单位、颜色与口径
 
@@ -408,7 +408,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 4. **停牌日不计入当日分母，每档均线独立分母**。把 MA200 无值的股票算成「未站上」，会让 5 年曲线左端系统性偏低且不会报错。
 5. **交易日历用全市场个股日期并集（阈值 30%）**，严禁只依赖指数文件。本地版用上证指数日历时曾误剔 920 只股票。
 6. **红涨绿跌**：上涨 `#d64545`、下跌 `#1f9d6b`。严禁反色。
-7. **依赖必须精确锁版本**：`akshare==1.20.35 / pandas==2.3.3 / numpy==2.5.4`。pandas 3.x 移除 `resample('M')` 等 API 会打断 akshare 内部逻辑；**范围约束（`<3` / `>=`）等于把 CI 环境交给 PyPI 抽签**——2026-11-17 `numpy<3` 自动漂到 2.5.5（11-13 成功时 2.5.4），26 个包里只有它变了，逐股取数阶段并发调用 pandas/numpy C 层直接 `Segmentation fault (exit 139)`（详见第 24 条）。`python check_workflows.py` 会断言三者都是 `pkg==x.y.z`，写成范围约束 CI 直接红。升级流程见 12.4-F（先小样本 → 过 2026-09-21 / 2026-11-06 两个锚点 → 才改 pin，不过就回滚；严禁无脑 `pip -U`）。
+7. **依赖必须精确锁版本**：`akshare==1.20.65 / pandas==2.3.3 / numpy==2.5.4`。pandas 3.x 移除 `resample('M')` 等 API 会打断 akshare 内部逻辑；**范围约束（`<3` / `>=`）等于把 CI 环境交给 PyPI 抽签**——2026-11-17 `numpy<3` 自动漂到 2.5.5（11-13 成功时 2.5.4），26 个包里只有它变了，逐股取数阶段并发调用 pandas/numpy C 层直接 `Segmentation fault (exit 139)`（详见第 24 条）。`python check_workflows.py` 会断言三者都是 `pkg==x.y.z`，写成范围约束 CI 直接红。升级流程见 12.4-F（先小样本 → 过 2026-09-21 / 2026-11-06 两个锚点 → 才改 pin，不过就回滚；严禁无脑 `pip -U`）。
 8. **境外 runner 四件套不能删**：`socket.setdefaulttimeout(12)`、并发 10、重试 2、`timeout-minutes: 150`（v3.14 起）。akshare 内部 `requests` 未设超时，境外遇连接问题会挂死；实测 v2 全量重算 19.9 分钟，v3 改 5 年窗口 + v3.12 混源后单次约 51 分钟，Compute 步骤还会自动重试一次，故上限留到 150 分钟。**别改回 90**：第二次重试会被硬超时掐断。
 9. **5 年历史是「当前股票池回算」**，有幸存者偏差。严禁在页面 / 文档里表述为「当时的真实全市场宽度」。
 10. **HTML 用唯一占位符 `__XXX__` 整段替换，不用 f-string 拼整页 JS**。一处括号转义错整页图表全废；生成后必须抽出 `<script>` 跑 `node --check`。
@@ -512,7 +512,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 | `codes.txt` | 5923 只代码快照 + **首行日期标记**，随仓库提交的数据资产 | 删了 / 写坏会让一次 WAF 限流放大成长期空洞；删掉首行 `# updated` 会让陈旧保护失效 |
 | `.github/workflows/breadth.yml` | 双 cron、取数、提交 | 改 cron 记得按 UTC 换算；`timeout-minutes` 150 不能减（v3.14 起容纳一次自动重试）；同一层级不许出现两个 `env:` |
 | `.github/workflows/maintenance.yml` | 每周体积体检 | 阈值 512000 KB、护栏、不 force push 是硬约束 |
-| `requirements.txt` | `akshare==1.20.35 / pandas==2.3.3 / numpy==2.5.4` | 改成范围约束会引入版本漂移：v3.14 前 `numpy<3` 漂到 2.5.5 直接 segfault 139 |
+| `requirements.txt` | `akshare==1.20.65 / pandas==2.3.3 / numpy==2.5.4` | 改成范围约束会引入版本漂移：v3.14 前 `numpy<3` 漂到 2.5.5 直接 segfault 139 |
 | `docs/index.html` | 生成物，ECharts 看板 | 别手改，下次运行会覆盖；要改去改 `HTML_TEMPLATE` |
 | `docs/breadth.csv` | 生成物，最多 1300 行 | 别当临时缓存清理 |
 | `docs/llms.txt` | 生成物，给 AI 的纯文本摘要，由 `write_llms()` 用同一个 `res` 生成 | **严禁手改**；手改会让它与 CSV 数据日脱节、静默过期。改文案改 `breadth.py` 的 `write_llms()`，改完离线重生成一次 |
@@ -563,13 +563,13 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 
 **A. 上游接口变了 / akshare 升级**
 1. 本地跑 `--limit 300 --codes-file codes.txt --out test-out --force --min-valid 100`，确认 `df["日期"]` / `df["收盘"]` 字段名与单位没变。
-2. 确认 `index_zh_a_hist` 三个代码仍返回日线。
+2. 确认 `index_zh_hist_em` 三个代码仍返回日线（旧名 `index_zh_a_hist` 在 1.20.44 已废）。
 3. 全量跑一次，比对 2026-09-21 锚点（MA200 ≈ 27.45%）与 2026-11-06 锚点（≈ 12.07%）。
 4. 两处都对得上再升级 `requirements.txt`，并同步第九章第 7 条；**升级 / 回滚 / 换源的完整流程见 F**。
 
 **B. 换股票池 / 加指数**
 - 换池：只准备 `--codes-file` 文件，**不要改 `codes.txt`**（它是全市场兜底）。
-- 加指数：只改 `INDEXES` 字典（代码、名称、颜色）+ 确认 `index_zh_a_hist` 支持该代码。前端会自动按 `DATA.indices` 生成曲线与图例。
+- 加指数：只改 `INDEXES` 字典（代码、名称、颜色）+ 确认 `index_zh_hist_em` 支持该代码。前端会自动按 `DATA.indices` 生成曲线与图例。
 
 **C. 曲线缺了一段 / 某天数据异常**
 1. 先看 `docs/breadth.csv` 该日 `n_ma200` 是否明显低于前后（正常 5000+）。
@@ -596,14 +596,14 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 **F. akshare 版本升级 / 接口挂了（换最新版本）**
 > 结论：**能换，但不是无脑 `pip install -U`**——换完必须过锚点才许上线，否则宁可回滚。升级是「动主链路」，按第九章第 7 条与本章锚点严格执行。
 
-1. **先分清「版本问题」还是「接口/网络问题」**：看 `breadth.yml` 日志。若是 `KeyError: '收盘'` / 字段名变 / `index_zh_a_hist` 异常 → 多半是 akshare 随东财改版未跟上或版本漂移，值得试升级；若是大量超时 / `仅成功取到 N 只` → 先按境外四件套与 D.1 处理（限流/网络），`pip -U` 通常救不了。
-2. **查最新版本**：`pip index versions akshare`（或看 https://pypi.org/project/akshare/ ）。项目已于 2026-11-07 由 `1.20.21` 升到 `akshare==1.20.35` 并通过全市场锚点（1300 个交易日四档占比最大偏差 0.09pct）；最新版本会持续变化，以 `pip index versions` 查询为准。
+1. **先分清「版本问题」还是「接口/网络问题」**：看 `breadth.yml` 日志。若是 `KeyError: '收盘'` / 字段名变 / `index_zh_hist_em` 异常 → 多半是 akshare 随东财改版未跟上或版本漂移，值得试升级；若是大量超时 / `仅成功取到 N 只` → 先按境外四件套与 D.1 处理（限流/网络），`pip -U` 通常救不了。
+2. **查最新版本**：`pip index versions akshare`（或看 https://pypi.org/project/akshare/ ）。项目已于 2026-11-07 由 `1.20.21` 升到 `1.20.35`（锚点最大偏差 0.09pct），2026-11-22 升到 **`akshare==1.20.65`** 并完成 1.20.44+ 的接口更名迁移（v3.16）；最新版本会持续变化，以 `pip index versions` 查询为准。**留意 1.20.44 起上游做过一次大规模改名（累计 405 个旧名），升级前先查 `ak.renamed_info("旧名")`。**
 3. **隔离试装 + 小样本验证**（**别直接改 CI 试**）：
    ```bash
    pip install -U "akshare==<新版本>"
    python breadth.py --limit 300 --codes-file codes.txt --out test-out --force --min-valid 100
    ```
-   确认 `stock_zh_a_hist` 仍返回 `日期 / 收盘 / 成交量` 等列、`hfq` 序列仍连续、`index_zh_a_hist` 三个指数（000300/000001/399006）正常。
+   确认 `stock_zh_a_hist_em` 仍返回 `日期 / 收盘 / 成交量` 等列、`hfq` 序列仍连续、`index_zh_hist_em` 三个指数（000300/000001/399006）正常。
 4. **过锚点才准上线**：全量跑一次，比对 **2026-09-21 MA200 ≈ 27.45%**、**2026-11-06 ≈ 12.07%**。偏差 > 0.3 个百分点即视为口径变了 → **回滚，不许上线**。
 5. **通过后**：改 `requirements.txt` 的 pin → 同步第九章第 7 条与版本记录 → 正常 commit（**绝不 force push**）。**pin 一律写 `pkg==x.y.z` 精确版本**：`pandas` / `numpy` 不许写成 `<3` / `>=`，`python check_workflows.py` 的 `DEPS_PIN_OK` 会拦下范围约束。改完还必须在 CI 上再跑一次 `--limit 200` smoke test 与一次全量重算，两次都通过才算升级完成（v3.14 事故：仅一个 numpy 补丁号变化就足以 segfault）。
 6. **回滚**：`git checkout requirements.txt`（或把 pin 改回旧版本）重新部署即可，`docs/` 数据文件不受影响。
@@ -651,7 +651,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 4. 要动 Worker 时读 https://github.com/wj624/a-stock-api 的 README。
 
 【硬约束，违反即算错】
-- 必须用 stock_zh_a_hist(adjust="hfq") 后复权价算均线；严禁用不复权价。
+- 必须用 stock_zh_a_hist_em(adjust="hfq") 后复权价算均线；严禁用不复权价。
 - 多源冗余分层（v3.12）：代码清单四级 / 指数三级始终启用、主源挂了才切；逐股历史备用源由
   HIST_FALLBACK 控制且默认关闭。开启前必须先在 GitHub Actions 海外 runner 跑
   probe-sources.yml 并看到 OVERSEAS_RUNNER_OK；本机国内 IP 测通不算数。
@@ -668,7 +668,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
   未满 200 根者不进 MA200 分母；幂等跳过前必须检查代码池陈旧度（7 天）。
 - 交易日历用全市场个股日期并集（阈值 30%），不许只依赖指数文件。
 - 红涨绿跌：上涨 #d64545、下跌 #1f9d6b。
-- 依赖必须精确锁 akshare==1.20.35 / pandas==2.3.3 / numpy==2.5.4；严禁 <3 / >= 等范围约束（v3.14 因 numpy 漂到 2.5.5 触发 segfault 139）。升级见 12.4-F：先小样本 + 全量锚点 + CI smoke test，全过才改 pin，不过就回滚；python check_workflows.py 必须输出 DEPS_PIN_OK。
+- 依赖必须精确锁 akshare==1.20.65 / pandas==2.3.3 / numpy==2.5.4；严禁 <3 / >= 等范围约束（v3.14 因 numpy 漂到 2.5.5 触发 segfault 139）。升级见 12.4-F：先小样本 + 全量锚点 + CI smoke test，全过才改 pin，不过就回滚；python check_workflows.py 必须输出 DEPS_PIN_OK。
 - 境外 runner 四件套不能删：12 秒 socket 超时、并发 10、重试 2、timeout 150（v3.14 起）。Compute 步骤最多 2 次尝试、间隔 60 秒，两次都失败才让 job 变红，已有 docs/ 不被覆盖。
 - 5 年历史是「当前股票池回算」，有幸存者偏差，不许表述为当时的真实全市场。
 - HTML 用 __XXX__ 唯一占位符整段替换，生成后抽 <script> 跑 node --check。
@@ -756,6 +756,8 @@ commit message 用中文，说明「改了什么 + 为什么」；涉及口径�
 | 2026-11-17 v3.14a | Worker 密钥门禁 | 用户确认「需要 Worker 密钥防复制仓库蹭额度」。核对结论：仓库 Secret `A_STOCK_API_KEY` 存在（11-14 更新）、4 个 workflow 全部引用、`breadth.py` 从环境变量读入 `X-API-Key`、仓库内 0 处明文；Worker 源码 `worker.js:1197` 对除 `/` 外所有路径强制校验 `X-API-Key !== env.API_KEY` → 401（`/` 只返回接口清单不含数据）。GitHub fork 不继承 Secrets，故复制仓库者拿不到 key。加固：新增 `check_worker_key()` 静态门禁输出 `WORKER_KEY_OK/FAIL`（4 个 workflow 引用 + 代码读取 + 无明文），反向测试删引用能准确拦截；第九章 24→**25 条**、12.1 文件表 / 12.5 提示词 / 12.6 自检 / 版本记录同步。远端提交 `38b48c3207` |
 
 | 2026-11-17 v3.15 | Spread 三级分档 + 指数百分位分档 + 价格预警线 | **为什么改**：① 旧版 `SPREAD_BIG=25` 一个值同时当「大劈叉线 / 禁买线 / 右轴虚线」，无回测依据；② 5 年窗口判定 vs 250 日窗口展示在 2026-11-17 同一天结论相反（5 年 Spread 上证 −53.45 判「大劈叉」 vs 250 日 +1.80 判「收敛」），根因是「指数百分位」没写清是 percentile rank 还是归一化分位；③ 双条件历史仅 298/1300 日成立（23%）、连续 ≥5 日仅 4 段，且入场后 120 日最大浮亏中位 **−16.5%**、浮亏<5% 仅约 **11%**，说明规则方向对但偏早，缺仓位纪律与失效边界。**1300 日回测证据**（指数 rank<30 且 `abs(Spread)<T` → 未来 120 日创业板指收益）：T=10 → **+16.8%**、15 → +13.7%、25 → +12.4%、35 → +9.4%、不过滤 → +3.2%，**单调衰减**，故 25 只是宽松边界、不是拐点，内圈再多切一档 10。**改了什么**：① 新增 `SPREAD_STRONG=10`（强收敛 / 可买档）、`IDX_RANK_LOW=20`（低位门槛 / 预警线来源）、`IDX_RANK_OK=30`（可用上限）、`IDX_RANK_INVALID=40`（失效线），`SPREAD_BIG=25` 保留为大劈叉 / 禁买线与右轴外圈；② 新增公共函数 `spread_grade(v)`（三档判定，杜绝多处字面量）与 `_pctl_point(values,q)`（百分位反解点位，最近秩法）；③ 页面：三张背离子图 `markLine` 增加 ±10 内圈细虚线、悬停三档标签、`guide_html` 全文重写（口径写死 + 三档 + 双条件 + 仓位 1/3–1/2 + 失效边界 + 回测依据）、`.guid` / `spread-note` / 页脚 `.src` 同步、综合研判区显示档位；④ **指数卡片新增价格预警行**：预警线 = 5 年 20% 分位点位（附距当前涨跌幅）、失效线 = 40% 分位点位，rank>40% 灰字提示规则失效；⑤ `write_llms()` 新增「低位阈值对应点位」表、背离表判定改走 `spread_grade()`、名词速查补弱收敛 / 强收敛 / 预警线 / 失效线；⑥ 模板加 `__SPREADSTRONG__` 占位符（`.replace()` 链已成对）。**回退方法**：把 `SPREAD_STRONG` 设回 `25`，即完全等价旧版「一刀切 25」（弱收敛档自动消失），无需改其他代码。**交叉验证锚点（2026-11-17）**：上证综指 3584.58 / rank 71.9% → 预警线 3080.96（−14.0%）/ 失效线 3254.56；沪深300 3976.46 / 44.3% → 3709.15（−6.7%）/ 3941.89；创业板指 2292.20 / 41.8% → **2002.73（−12.6%）/ 失效线 2267.63**（现价已在失效线上方，规则提示失效）。第九章 25→**26 条**、5.0 / 5.1 / 5.2 / 5.6 / 八章旋钮表 / 12.1 / 12.4-I / 12.5 同步；`docs/` 未手改，由流水线重算推进 |
+
+| 2026-11-22 v3.16 | akshare 1.20.65 + 接口更名迁移 | **为什么升**：`1.20.35` 锁在 11-06，而上游 11-14 一天发了 21 个版本、1.20.41~1.20.46 累计改名 273 个接口（405 个旧名进「更名一览表」），旧 pin 已明显落后且拿不到数据源修复。**改了什么**：在隔离环境装 `akshare==1.20.65`（pandas 2.3.3 / numpy 2.5.4 不动），把受影响的 6 处调用全部迁移——`stock_zh_a_hist`→`stock_zh_a_hist_em`（逐股主源）、`index_zh_a_hist`→`index_zh_hist_em`（指数主源）、`stock_zh_a_spot`→`stock_zh_a_spot_sina`（代码清单 ③）、`stock_zh_index_daily`→`index_zh_daily_sina`（指数 ②）、`stock_zh_index_daily_tx`→`index_zh_daily_tx`（指数 ③，原接口已被删除）、`stock_zh_a_daily`→`stock_zh_a_hist_sina`（逐股备用，1.20.46 先改 `_sina`、1.20.64 再改 `_hist_sina` 并新增 `period` 参数）；`probe_sources.py` 同步 4 处，否则海外探测会误报 FAIL。**新接口实测列名**：`index_zh_daily_sina` / `index_zh_daily_tx` 仍返回 `date/close`；`stock_zh_a_hist_sina` 返回 `date/close` 且支持 `adjust="hfq"`；`stock_zh_a_hist_em` / `index_zh_hist_em` 仍返回 `日期/收盘`；`stock_zh_a_spot_sina` 首列仍是 `代码`。**验证**：小样本 300 只全链路通过（本机 IP 被东财限流，走新浪兜底 300/300、三条指数曲线自动切新浪），全量重算与 2026-09-21 / 2026-11-06 双锚点由 CI 复核。**影响面**：SPREAD_* / IDX_RANK_* / `spread_grade()` / `_pctl_point()` 一处未动，口径不变；`docs/` 三份产物由流水线重新生成，未手改。第九章第 7 条、3.0 / 3.2、12.1、12.4-A/B/F、12.5 提示词同步。 |
 
 **交叉验证锚点**（两套完全不同数据源 / 复权方式）：
 

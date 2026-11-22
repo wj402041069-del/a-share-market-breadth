@@ -70,22 +70,23 @@ print(f"== 探测配置：socket 超时 {PROBE_TIMEOUT}s / 并发 {MAX_WORKERS} 
 
 print("\n== ① 代码清单层（非东财源）==", flush=True)
 show("stock_info_a_code_name", lambda: ak.stock_info_a_code_name())
-show("stock_zh_a_spot (新浪)", lambda: ak.stock_zh_a_spot())
+show("stock_zh_a_spot_sina (新浪)", lambda: ak.stock_zh_a_spot_sina())
 show("stock_zh_a_spot_tx (腾讯)", lambda: ak.stock_zh_a_spot_tx())
 
 print("\n== ② 指数日线层（非东财源）==", flush=True)
 for sym in INDEX_SYMBOLS:
-    show(f"stock_zh_index_daily {sym}",
-         lambda s=sym: ak.stock_zh_index_daily(symbol=s))
-    show(f"stock_zh_index_daily_tx {sym}",
-         lambda s=sym: ak.stock_zh_index_daily_tx(symbol=s, start_date=START, end_date=END))
+    show(f"index_zh_daily_sina {sym}",
+         lambda s=sym: ak.index_zh_daily_sina(symbol=s))
+    show(f"index_zh_daily_tx {sym}",
+         lambda s=sym: ak.index_zh_daily_tx(symbol=s, start_date=START, end_date=END))
 
 print("\n== ③ 逐股后复权历史层（HIST_FALLBACK 的唯一依据）==", flush=True)
 tasks = []
 for code in SAMPLE:
-    tasks.append((f"stock_zh_a_daily hfq {code}",
-                  lambda c=code: ak.stock_zh_a_daily(symbol=c, start_date=START,
-                                                     end_date=END, adjust="hfq")))
+    tasks.append((f"stock_zh_a_hist_sina hfq {code}",
+                  lambda c=code: ak.stock_zh_a_hist_sina(symbol=c, period="daily",
+                                                         start_date=START, end_date=END,
+                                                         adjust="hfq")))
     tasks.append((f"stock_zh_a_hist_tx hfq {code}",
                   lambda c=code: ak.stock_zh_a_hist_tx(symbol=c, start_date=START,
                                                        end_date=END, adjust="hfq")))
@@ -96,13 +97,13 @@ for label, (_, line) in results:
     print(line, flush=True)
 
 ok_sina = sum(1 for label, (ok, _) in results
-              if ok and label.startswith("stock_zh_a_daily"))
+              if ok and label.startswith("stock_zh_a_hist_sina"))
 ok_tx = sum(1 for label, (ok, _) in results
             if ok and label.startswith("stock_zh_a_hist_tx"))
 n = len(SAMPLE)
 rs, rt = ok_sina / n, ok_tx / n
 print("\n== 汇总 ==", flush=True)
-print(f"  新浪 stock_zh_a_daily     : {ok_sina}/{n} = {rs:.1%}", flush=True)
+print(f"  新浪 stock_zh_a_hist_sina : {ok_sina}/{n} = {rs:.1%}", flush=True)
 print(f"  腾讯 stock_zh_a_hist_tx   : {ok_tx}/{n} = {rt:.1%}", flush=True)
 good = max(rs, rt) >= MIN_OK_RATIO
 print(f"  阈值 {MIN_OK_RATIO:.0%} → " +

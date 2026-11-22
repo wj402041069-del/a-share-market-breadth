@@ -4,8 +4,12 @@
 #   其余 25 个包与 runner 镜像完全一致，逐股取数阶段并发调用 pandas/numpy C 层
 #   直接 Segmentation fault (exit 139)，3 分 43 秒崩溃、提交被跳过。
 #   这里锁回 11-13 连续 3 次全量重算成功验证过的组合。
-#   要升级：先在 CI 跑一次 --limit 200 的 smoke test + 一次全量重算，
-#   两次都通过才允许改这里的版本号（见 README 12.4-F）。
-akshare==1.20.35
+# v3.16（2026-11-22）：akshare 1.20.35 -> 1.20.65。1.20.44 起上游大规模改名，
+#   本仓库受影响的 6 处已同步迁移：stock_zh_a_hist->stock_zh_a_hist_em、
+#   index_zh_a_hist->index_zh_hist_em、stock_zh_a_spot->stock_zh_a_spot_sina、
+#   stock_zh_index_daily->index_zh_daily_sina、stock_zh_index_daily_tx->index_zh_daily_tx、
+#   stock_zh_a_daily->stock_zh_a_hist_sina；pandas / numpy 保持 2.3.3 / 2.5.4 不动。
+#   以后升级照旧：先 CI smoke test + 全量重算锚点，两次都过才改版本号（见 README 12.4-F）。
+akshare==1.20.65
 pandas==2.3.3
 numpy==2.5.4
