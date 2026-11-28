@@ -10,6 +10,8 @@
 #   stock_zh_index_daily->index_zh_daily_sina、stock_zh_index_daily_tx->index_zh_daily_tx、
 #   stock_zh_a_daily->stock_zh_a_hist_sina；pandas / numpy 保持 2.3.3 / 2.5.4 不动。
 #   以后升级照旧：先 CI smoke test + 全量重算锚点，两次都过才改版本号（见 README 12.4-F）。
-akshare==1.20.65
+# v3.17（2026-11-28）：akshare 1.20.65 -> 1.20.70，10 个接口名全部仍在（无新增改名），
+#   本机同源 A/B 全 1300 日 × 四档占比偏差 0.000，pandas / numpy 仍锁 2.3.3 / 2.5.4 不动。
+akshare==1.20.70
 pandas==2.3.3
 numpy==2.5.4

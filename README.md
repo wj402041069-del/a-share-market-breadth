@@ -408,7 +408,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 4. **停牌日不计入当日分母，每档均线独立分母**。把 MA200 无值的股票算成「未站上」，会让 5 年曲线左端系统性偏低且不会报错。
 5. **交易日历用全市场个股日期并集（阈值 30%）**，严禁只依赖指数文件。本地版用上证指数日历时曾误剔 920 只股票。
 6. **红涨绿跌**：上涨 `#d64545`、下跌 `#1f9d6b`。严禁反色。
-7. **依赖必须精确锁版本**：`akshare==1.20.65 / pandas==2.3.3 / numpy==2.5.4`。pandas 3.x 移除 `resample('M')` 等 API 会打断 akshare 内部逻辑；**范围约束（`<3` / `>=`）等于把 CI 环境交给 PyPI 抽签**——2026-11-17 `numpy<3` 自动漂到 2.5.5（11-13 成功时 2.5.4），26 个包里只有它变了，逐股取数阶段并发调用 pandas/numpy C 层直接 `Segmentation fault (exit 139)`（详见第 24 条）。`python check_workflows.py` 会断言三者都是 `pkg==x.y.z`，写成范围约束 CI 直接红。升级流程见 12.4-F（先小样本 → 过 2026-09-21 / 2026-11-06 两个锚点 → 才改 pin，不过就回滚；严禁无脑 `pip -U`）。
+7. **依赖必须精确锁版本**：`akshare==1.20.70 / pandas==2.3.3 / numpy==2.5.4`。pandas 3.x 移除 `resample('M')` 等 API 会打断 akshare 内部逻辑；**范围约束（`<3` / `>=`）等于把 CI 环境交给 PyPI 抽签**——2026-11-17 `numpy<3` 自动漂到 2.5.5（11-13 成功时 2.5.4），26 个包里只有它变了，逐股取数阶段并发调用 pandas/numpy C 层直接 `Segmentation fault (exit 139)`（详见第 24 条）。`python check_workflows.py` 会断言三者都是 `pkg==x.y.z`，写成范围约束 CI 直接红。升级流程见 12.4-F（先小样本 → 过 2026-09-21 / 2026-11-06 两个锚点 → 才改 pin，不过就回滚；严禁无脑 `pip -U`）。
 8. **境外 runner 四件套不能删**：`socket.setdefaulttimeout(12)`、并发 10、重试 2、`timeout-minutes: 150`（v3.14 起）。akshare 内部 `requests` 未设超时，境外遇连接问题会挂死；实测 v2 全量重算 19.9 分钟，v3 改 5 年窗口 + v3.12 混源后单次约 51 分钟，Compute 步骤还会自动重试一次，故上限留到 150 分钟。**别改回 90**：第二次重试会被硬超时掐断。
 9. **5 年历史是「当前股票池回算」**，有幸存者偏差。严禁在页面 / 文档里表述为「当时的真实全市场宽度」。
 10. **HTML 用唯一占位符 `__XXX__` 整段替换，不用 f-string 拼整页 JS**。一处括号转义错整页图表全废；生成后必须抽出 `<script>` 跑 `node --check`。
@@ -512,7 +512,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 | `codes.txt` | 5923 只代码快照 + **首行日期标记**，随仓库提交的数据资产 | 删了 / 写坏会让一次 WAF 限流放大成长期空洞；删掉首行 `# updated` 会让陈旧保护失效 |
 | `.github/workflows/breadth.yml` | 双 cron、取数、提交 | 改 cron 记得按 UTC 换算；`timeout-minutes` 150 不能减（v3.14 起容纳一次自动重试）；同一层级不许出现两个 `env:` |
 | `.github/workflows/maintenance.yml` | 每周体积体检 | 阈值 512000 KB、护栏、不 force push 是硬约束 |
-| `requirements.txt` | `akshare==1.20.65 / pandas==2.3.3 / numpy==2.5.4` | 改成范围约束会引入版本漂移：v3.14 前 `numpy<3` 漂到 2.5.5 直接 segfault 139 |
+| `requirements.txt` | `akshare==1.20.70 / pandas==2.3.3 / numpy==2.5.4` | 改成范围约束会引入版本漂移：v3.14 前 `numpy<3` 漂到 2.5.5 直接 segfault 139 |
 | `docs/index.html` | 生成物，ECharts 看板 | 别手改，下次运行会覆盖；要改去改 `HTML_TEMPLATE` |
 | `docs/breadth.csv` | 生成物，最多 1300 行 | 别当临时缓存清理 |
 | `docs/llms.txt` | 生成物，给 AI 的纯文本摘要，由 `write_llms()` 用同一个 `res` 生成 | **严禁手改**；手改会让它与 CSV 数据日脱节、静默过期。改文案改 `breadth.py` 的 `write_llms()`，改完离线重生成一次 |
@@ -597,7 +597,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
 > 结论：**能换，但不是无脑 `pip install -U`**——换完必须过锚点才许上线，否则宁可回滚。升级是「动主链路」，按第九章第 7 条与本章锚点严格执行。
 
 1. **先分清「版本问题」还是「接口/网络问题」**：看 `breadth.yml` 日志。若是 `KeyError: '收盘'` / 字段名变 / `index_zh_hist_em` 异常 → 多半是 akshare 随东财改版未跟上或版本漂移，值得试升级；若是大量超时 / `仅成功取到 N 只` → 先按境外四件套与 D.1 处理（限流/网络），`pip -U` 通常救不了。
-2. **查最新版本**：`pip index versions akshare`（或看 https://pypi.org/project/akshare/ ）。项目已于 2026-11-07 由 `1.20.21` 升到 `1.20.35`（锚点最大偏差 0.09pct），2026-11-22 升到 **`akshare==1.20.65`** 并完成 1.20.44+ 的接口更名迁移（v3.16）；最新版本会持续变化，以 `pip index versions` 查询为准。**留意 1.20.44 起上游做过一次大规模改名（累计 405 个旧名），升级前先查 `ak.renamed_info("旧名")`。**
+2. **查最新版本**：`pip index versions akshare`（或看 https://pypi.org/project/akshare/ ）。项目已于 2026-11-07 由 `1.20.21` 升到 `1.20.35`（锚点最大偏差 0.09pct），2026-11-22 升到 **`akshare==1.20.65`** 并完成 1.20.44+ 的接口更名迁移（v3.16）；2026-11-28 再升到 **`akshare==1.20.70`**（v3.17，无新增改名、同源 A/B 全序列偏差 0.000）；最新版本会持续变化，以 `pip index versions` 查询为准。**留意 1.20.44 起上游做过一次大规模改名（累计 405 个旧名），升级前先查 `ak.renamed_info("旧名")`。**
 3. **隔离试装 + 小样本验证**（**别直接改 CI 试**）：
    ```bash
    pip install -U "akshare==<新版本>"
@@ -668,7 +668,7 @@ python -c "import ast;ast.parse(open('breadth.py',encoding='utf-8').read())"   #
   未满 200 根者不进 MA200 分母；幂等跳过前必须检查代码池陈旧度（7 天）。
 - 交易日历用全市场个股日期并集（阈值 30%），不许只依赖指数文件。
 - 红涨绿跌：上涨 #d64545、下跌 #1f9d6b。
-- 依赖必须精确锁 akshare==1.20.65 / pandas==2.3.3 / numpy==2.5.4；严禁 <3 / >= 等范围约束（v3.14 因 numpy 漂到 2.5.5 触发 segfault 139）。升级见 12.4-F：先小样本 + 全量锚点 + CI smoke test，全过才改 pin，不过就回滚；python check_workflows.py 必须输出 DEPS_PIN_OK。
+- 依赖必须精确锁 akshare==1.20.70 / pandas==2.3.3 / numpy==2.5.4；严禁 <3 / >= 等范围约束（v3.14 因 numpy 漂到 2.5.5 触发 segfault 139）。升级见 12.4-F：先小样本 + 全量锚点 + CI smoke test，全过才改 pin，不过就回滚；python check_workflows.py 必须输出 DEPS_PIN_OK。
 - 境外 runner 四件套不能删：12 秒 socket 超时、并发 10、重试 2、timeout 150（v3.14 起）。Compute 步骤最多 2 次尝试、间隔 60 秒，两次都失败才让 job 变红，已有 docs/ 不被覆盖。**v3.15a 起第 2 次重试会追加 `--workers 4` 降并发**（首次仍用默认并发 10），减少 C 层并发竞争导致的偶发 segfault；日志见 `Compute attempt 2/2`，不必因重试并发变化而误判口径改变。
 - 5 年历史是「当前股票池回算」，有幸存者偏差，不许表述为当时的真实全市场。
 - HTML 用 __XXX__ 唯一占位符整段替换，生成后抽 <script> 跑 node --check。
@@ -759,6 +759,7 @@ commit message 用中文，说明「改了什么 + 为什么」；涉及口径�
 
 | 2026-11-17 v3.15a | 重试并发降到 4 | 承接 v3.14 的崩溃自愈：复核发现偶发 segfault（exit 139）与 runner 镜像 / 取数并发相关。`breadth.yml` 两段式重算改为「首次仍用默认并发，第 2 次重试追加 `--workers 4`」（`breadth.py` 已有该参数），减少 akshare / curl_cffi / pandas / numpy C 层并发竞争；两次都失败仍不覆盖已有产物。仅改 workflow，未动口径 / 阈值 / 展示。远端提交 `85b419e3` |
 | 2026-11-22 v3.16 | akshare 1.20.65 + 接口更名迁移 | **为什么升**：`1.20.35` 锁在 11-06，而上游 11-14 一天发了 21 个版本、1.20.41~1.20.46 累计改名 273 个接口（405 个旧名进「更名一览表」），旧 pin 已明显落后且拿不到数据源修复。**改了什么**：在隔离环境装 `akshare==1.20.65`（pandas 2.3.3 / numpy 2.5.4 不动），把受影响的 6 处调用全部迁移——`stock_zh_a_hist`→`stock_zh_a_hist_em`（逐股主源）、`index_zh_a_hist`→`index_zh_hist_em`（指数主源）、`stock_zh_a_spot`→`stock_zh_a_spot_sina`（代码清单 ③）、`stock_zh_index_daily`→`index_zh_daily_sina`（指数 ②）、`stock_zh_index_daily_tx`→`index_zh_daily_tx`（指数 ③，原接口已被删除）、`stock_zh_a_daily`→`stock_zh_a_hist_sina`（逐股备用，1.20.46 先改 `_sina`、1.20.64 再改 `_hist_sina` 并新增 `period` 参数）；`probe_sources.py` 同步 4 处，否则海外探测会误报 FAIL。**新接口实测列名**：`index_zh_daily_sina` / `index_zh_daily_tx` 仍返回 `date/close`；`stock_zh_a_hist_sina` 返回 `date/close` 且支持 `adjust="hfq"`；`stock_zh_a_hist_em` / `index_zh_hist_em` 仍返回 `日期/收盘`；`stock_zh_a_spot_sina` 首列仍是 `代码`。**验证**：小样本 300 只全链路通过（本机 IP 被东财限流，走新浪兜底 300/300、三条指数曲线自动切新浪），全量重算与 2026-09-21 / 2026-11-06 双锚点由 CI 复核。**影响面**：SPREAD_* / IDX_RANK_* / `spread_grade()` / `_pctl_point()` 一处未动，口径不变；`docs/` 三份产物由流水线重新生成，未手改。第九章第 7 条、3.0 / 3.2、12.1、12.4-A/B/F、12.5 提示词同步。 |
+| 2026-11-28 v3.17 | akshare 1.20.70 | **为什么升**：`1.20.65` 锁在 11-22，PyPI 已到 `1.20.70`（2026-11-25 发布、超 24h）。**改了什么**：只动 `requirements.txt` 的 akshare pin（`1.20.65` → `1.20.70`），pandas `2.3.3` / numpy `2.5.4` 原样保留，`breadth.py` 一行未改。**验证**：① 10 个接口（`stock_zh_a_spot_em` / `stock_info_a_code_name` / `stock_zh_a_spot_sina` / `stock_zh_a_spot_tx` / `stock_zh_a_hist_em` / `stock_zh_a_hist_sina` / `stock_zh_a_hist_tx` / `index_zh_hist_em` / `index_zh_daily_sina` / `index_zh_daily_tx`）全部存在，无新增改名；② 小样本 300 只 **300/300 = 100%**（全东财，未启用 fallback）；③ 全市场 5579 只、有效样本 5554 只，锚点 2026-09-21 MA200 **27.45%**（期望 27.45）、2026-11-06 **12.07%**（期望 12.06）；④ **同机同源 A/B 对照**：1.20.70 与 1.20.65 各跑一次全市场，1300 个共同交易日四档占比最大绝对差 **0.000**，证明两版完全等价。与线上旧 CSV 的 0.36pct 极值出现在 2024-10（当日 `n_ma200` 完全相同、仅 19 只个股判定翻转），源自线上基线为「东财 0 / 新浪 5526」混源、本次为全东财，属已记录的 0.2% 判定噪声，**不是版本回归**。**影响面**：`SPREAD_*` / `IDX_RANK_*` / `spread_grade()` / `_pctl_point()` 一处未动，口径不变；第九章第 7 条、12.1 文件表、12.4-F 步骤 2 同步。
 
 **交叉验证锚点**（两套完全不同数据源 / 复权方式）：
 
